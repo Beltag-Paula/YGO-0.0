@@ -1,0 +1,43 @@
+Player
+ cards
+ hand
+ zones
+ LP
+
+Game
+ current turn
+ current phase
+ chain
+ attacks
+ events
+ rules
+
+
+
+Effect engine (you build this)
+You define reusable effect primitives:
+Examples:
+destroy(target)
+draw(player, n)
+specialSummon(target, zone)
+changeControl(target)
+negate(event)
+modifyATK(target, value)
+preventBattleDamage(player, duration)
+
+const cardEffects = {
+  83764718: (game, card, context) => {
+    // Monster Reborn
+    const target = context.selectTarget({
+      zone: "GY",
+      type: "monster"
+    });
+
+    game.specialSummon(target, context.player);
+  },
+
+  55144522: (game, card, context) => {
+    // Pot of Greed
+    game.draw(context.player, 2);
+  }
+};

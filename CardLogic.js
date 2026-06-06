@@ -1,8 +1,8 @@
 /**
  * This is the static definition
  */
-class Card{
-    constructor(data){
+class Card {
+    constructor(data) {
         //all
         this.id = data.id;
         this.name = data.name;
@@ -31,8 +31,8 @@ class Card{
  * Game Card knows what it is right now
  */
 
-class GameCard{
-    constructor(card, owner){
+class GameCard {
+    constructor(card, owner) {
         this.card = card;
         this.owner = owner;
 
@@ -46,9 +46,9 @@ class GameCard{
 
         //2nd turn
         this.state = {
-        summonedThisTurn : false, //if the monster was summoned this player's turn or not
-        hasAttacked : false, //if the monster attacked yet or not
-        effectUsedThisTurn : false //if the monster has used their effect not
+            summonedThisTurn: false, //if the monster was summoned this player's turn or not
+            hasAttacked: false, //if the monster attacked yet or not
+            effectUsedThisTurn: false //if the monster has used their effect not
         }
 
         //spell-trap state
@@ -60,13 +60,13 @@ class GameCard{
         this.modifiers = {
             atk: 0,
             def: 0,
-            cannotAttack:false,
-            effectsNegated:false,
-            indestructible:false
+            cannotAttack: false,
+            effectsNegated: false,
+            indestructible: false
         }
 
     }
 }
 
 
-module.exports = {Card, GameCard};
+module.exports = { Card, GameCard };

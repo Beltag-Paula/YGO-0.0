@@ -22,6 +22,8 @@ class Player {
     this.zone.deck = deck.mainDeck;
     this.zone.extraDeck = deck.extraDeck;
     this.zone.sideDeck = deck.sideDeck;
+
+    this.normalSummonedThisTurn = false;
   }
   //////////////////////////////////////////////////////////////////////////////
   getZone(zoneName) {
@@ -101,35 +103,73 @@ class Player {
   }
 
   //this is shit
-  moveCard(card, fromZoneA, toZoneB, toIndex = null) {
+  moveCard(card, fromZoneName, toZoneName, toIndex = null) {
+    const fromZone = this.getZone(fromZoneName);
+    const toZone = this.getZone(toZoneName);
 
-    const from = this.getZone(fromZoneA);
-    const to = this.getZone(toZoneB);
-
-    if (!from || !to) {
-      throw new Error(`Invalid zone: ${fromZoneA} -> ${toZoneB}`);
+    if (!fromZone) {
+      throw new Error(`Invalid source zone: ${fromZoneName}`);
     }
 
-    // remove
-    const removed = this.removeFromZone(from, card);
+    if (!toZone) {
+      throw new Error(`Invalid target zone: ${toZoneName}`);
+    }
+
+    // 1. REMOVE from source
+    const removed = this.removeFromZone(fromZone, card);
+
     if (!removed) {
       throw new Error("Card not found in source zone");
     }
 
-    // add
-    this.addToZone(to, card, toIndex);
+    // 2. ADD to destination
+    this.addToZone(toZone, card, toIndex);
 
-    // update state
-    card.location = toZoneB;
+    // 3. UPDATE card state
+    card.location = toZoneName;
+
+    if (toIndex !== null) {
+      card.zoneIndex = toIndex;
+    } else {
+      card.zoneIndex = null;
+    }
 
     return true;
   }
-  summonCard(card, facePosition, zoneLocation) {
-    //normal (<=4 star level); tribute lvl 5&6 means tribute one card; tribute 7-8 tribuute two cards; 9> tribute 3 cards
-    //ritual summonn (ritual spell + ritual monster present in both hands)
-    //fusion summon (polymerization spell in hand; monsters should be either in hand or in hand)
 
-    //flip card effect of normal monster?
+
+  summonMonster(card, battlePosition, faceUp, zoneIndex) {
+    const zone = this.zone.monster;
+
+    // 1. must be in hand
+    if (card.location !== "hand") {
+      throw new Error("Card must be in hand to summon");
+    }
+
+    // 2. must be normal summonable monster
+    if (!card.card.level || card.card.level > 4) {
+      throw new Error("Only level 1–4 monsters can be normal summoned");
+    }
+
+    // 3. zone validation
+    if (zoneIndex < 0 || zoneIndex >= zone.length) {
+      throw new Error("Invalid monster zone index");
+    }
+
+    // 4. occupancy check
+    if (zone[zoneIndex]) {
+      throw new Error("Monster zone already occupied");
+    }
+
+    // 5. move card (single source of truth)
+    this.moveCard(card, "hand", "monster", zoneIndex);
+
+    // 6. update state
+    card.faceUp = faceUp;
+    card.position = battlePosition;
+    card.state.summonedThisTurn = true;
+
+    return true;
   }
 
   changeCardPosition(card, facePosition, zoneLocation) {

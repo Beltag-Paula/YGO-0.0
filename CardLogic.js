@@ -46,7 +46,6 @@ class GameCard {
 
         //2nd turn
         this.state = {
-            summonedThisTurn: false, //if the monster was summoned this player's turn or not
             hasAttacked: false, //if the monster attacked yet or not
             effectUsedThisTurn: false //if the monster has used their effect not
         }

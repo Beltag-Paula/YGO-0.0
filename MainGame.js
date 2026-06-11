@@ -1,19 +1,90 @@
-const Player = require("./Player");
-
 class MainGame {
     constructor(player1, player2) {
         this.player1 = player1;
         this.player2 = player2;
 
-        this.turn = 1;
+        this.turn = 0;
 
         this.currentPlayer = player1;
         this.opponentPlayer = player2;
 
         this.phase = "draw";
+
+        this.firstTurn = true;
+    }
+
+    startDuel() {
+        this.player1.shuffleDeck();
+        this.player2.shuffleDeck();
+
+        this.player1.drawCard(5);
+        this.player2.drawCard(5);
+
+        this.turn = 1;
+
+        console.log("=== DUEL START ===");
+        console.log(`Turn ${this.turn}`);
+        console.log(`${this.currentPlayer.name} goes first`);
+    }
+
+    drawPhase() {
+        console.log(`${this.currentPlayer.name} - Draw Phase`);
+
+        this.currentPlayer.drawCard(1);
+
+        this.phase = "standby";
+    }
+
+    standbyPhase() {
+        console.log(`${this.currentPlayer.name} - Standby Phase`);
+
+        this.phase = "m1";
+    }
+
+    mainPhase1() {
+        console.log(`${this.currentPlayer.name} - Main Phase 1`);
+        // Player actions happen here
+        if (this.firstTurn) {
+            console.log("Battle Phase && Main Phase 2 skipped on first turn");
+
+            this.phase = "end";
+        }
+
+        else {
+            this.phase = "battle";
+        }
+    }
+
+    battlePhase() {
+
+        console.log(`${this.currentPlayer.name} - Battle Phase`);
+
+        // attacks happen here
+
+        this.phase = "m2";
+    }
+
+    mainPhase2() {
+        console.log(`${this.currentPlayer.name} - Main Phase 2`);
+
+        // Player actions happen here
+
+        this.phase = "end";
+    }
+
+    endPhase() {
+        console.log(`${this.currentPlayer.name} - End Phase`);
+
+        this.endTurn();
     }
 
     endTurn() {
+        this.currentPlayer.normalSummonedThisTurn = false;
+
+        if (this.firstTurn) {
+            this.firstTurn = false;
+        }
+
         this.turn++;
 
         if (this.currentPlayer === this.player1) {
@@ -25,71 +96,54 @@ class MainGame {
         }
 
         this.phase = "draw";
+
+        console.log("");
+        console.log(`=== TURN ${this.turn} ===`);
+        console.log(`Current Player: ${this.currentPlayer.name}`);
     }
 
     nextPhase() {
+
         switch (this.phase) {
+
             case "draw":
-                console.log("Draw phase");
-                this.phase = "standby";
+                this.drawPhase();
                 break;
 
             case "standby":
-                console.log("Standby phase");
-                this.phase = "m1";
+                this.standbyPhase();
                 break;
 
             case "m1":
-                if (this.turn === 1) {
-                    this.phase = "end";
-                    break;
-                }
-                else {
-                    console.log("Main Phase 1");
-                    this.phase = "battle";
-                    break; console.log("Main Phase 1");
-                    this.phase = "battle";
-                    break;
-                }
-
+                this.mainPhase1();
+                break;
 
             case "battle":
-                console.log("Battle Phase");
-                this.phase = "m2";
+                this.battlePhase();
                 break;
 
             case "m2":
-                console.log("Main Phase 2");
-                this.phase = "end";
+                this.mainPhase2();
                 break;
 
             case "end":
-                console.log("End Phase");
-                this.endTurn();
+                this.endPhase();
                 break;
+
+            default:
+                throw new Error(`Error`);
         }
     }
 
     start() {
-        this.player1.shuffleDeck();
-        this.player2.shuffleDeck();
+        this.startDuel();
+        const interval = setInterval(() => {
+            this.nextPhase();
 
-        this.player1.drawCard(5);
-        this.player2.drawCard(5);
-
-        console.log("Game started");
-        console.log(`Turn ${this.turn}`);
-        console.log(`Current player: ${this.currentPlayer.name}`);
-        console.log(`Phase: ${this.phase}`);
-        console.log(`${this.player1.name} has ${this.player1.zone.hand.map(c => c.card.name)} in their hand`);
-        this.player1.drawCard(1);
-        this.nextPhase();
-        console.log(`Phase: ${this.phase}`);
-        console.log(`${this.player1.name} has ${this.player1.zone.hand.map(c => c.card.name)} in their hand`);
-        
-
-
-
+            if (this.turn > 3) {
+                clearInterval(interval);
+            }
+        }, 500);
     }
 }
 

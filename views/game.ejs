@@ -1,14 +1,173 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Game</title>
+  <title>Yu-Gi-Oh Duel Arena</title>
+  <%- include('partials/style') %>
 </head>
+
 <body>
 
-  <%- include('partials/menu') %>
+  <div class="game-board">
 
-  <h1>I have no ideea what I am doing</h1>
-  <p>still no ideea.</p>
+    <!-- OPPONENT SIDE -->
+    <div class="player-section opponent-side">
+      
+      <!-- Opponent Hand is now strictly on top -->
+      <div class="hand">
+        <% player2.zone.hand.forEach(gameCard => { %>
+          <div class="card face-down"></div>
+        <% }) %>
+      </div>
+
+      <div class="playmat">
+        <!-- Opponent Left Side: Extra on top, Field on bottom -->
+        <div class="mat-side">
+          <div class="slot" data-label="Extra (<%= player2.zone.extraDeck.length %>)"></div>
+          <div class="slot" data-label="Field">
+            <% if(player2.zone.field) { %>
+              <div class="card <%= player2.zone.field.faceUp ? '' : 'face-down' %>">
+                <img src="<%= player2.zone.field.card.image %>" />
+              </div>
+            <% } %>
+          </div>
+        </div>
+
+        <div class="mat-center">
+          <!-- Opponent Spell/Trap row is on top, right below their hand -->
+          <div class="field-row">
+            <% player2.zone.spellTrap.forEach((gameCard, index) => { %>
+              <div class="slot" data-label="S/T<%= index+1 %>">
+                <% if(gameCard) { %>
+                  <div class="card <%= gameCard.faceUp ? '' : 'face-down' %>">
+                    <img src="<%= gameCard.card.image %>" />
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+
+          <!-- Opponent Monster row sits below S/T, bordering the center line -->
+          <div class="field-row">
+            <% player2.zone.monster.forEach((gameCard, index) => { %>
+              <div class="slot" data-label="M<%= index+1 %>">
+                <% if(gameCard) { %>
+                  <div class="card <%= gameCard.faceUp ? '' : 'face-down' %> <%= gameCard.position %>">
+                    <img src="<%= gameCard.card.image %>" />
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+
+        <!-- Opponent Right Side: GY on top, Deck on bottom -->
+        <div class="mat-side">
+          <div class="slot" data-label="GY (<%= player2.zone.graveyard.length %>)">
+            <% if(player2.zone.graveyard.length > 0) { %>
+              <div class="card"><img src="<%= player2.zone.graveyard[player2.zone.graveyard.length - 1].card.image %>" /></div>
+            <% } %>
+          </div>
+          <div class="slot unique-deck-slot" data-label="Deck">
+            <% if(player2.zone.deck.length > 0) { %> 
+              <div class="card face-down"></div> 
+              <span class="deck-counter"><%= player2.zone.deck.length %></span>
+            <% } %>
+          </div>
+        </div>
+      </div>
+
+      <div class="player-info">
+        <h2><%= player2.name %></h2>
+        <div class="lp-display">LP: <%= player2.lifePoints %></div>
+      </div>
+    </div>
+
+
+    <!-- RETRO PHASE CONTROLLER BAR -->
+    <div class="phase-bar">
+      <button class="phase-btn active" data-phase="draw">DRAW</button>
+      <button class="phase-btn" data-phase="standby">STANDBY</button>
+      <button class="phase-btn" data-phase="main1">MAIN 1</button>
+      <button class="phase-btn" data-phase="battle">BATTLE</button>
+      <button class="phase-btn" data-phase="main2">MAIN 2</button>
+      <button class="phase-btn" data-phase="end">END</button>
+    </div>
+
+
+    <!-- PLAYER SIDE -->
+    <div class="player-section player-side">
+      <div class="player-info">
+        <h2><%= player1.name %></h2>
+        <div class="lp-display">LP: <%= player1.lifePoints %></div>
+      </div>
+
+      <div class="playmat">
+        <!-- Player Left Side: Extra on top, Field on bottom -->
+        <div class="mat-side">
+          <div class="slot" data-label="Extra (<%= player1.zone.extraDeck.length %>)"></div>
+          <div class="slot" data-label="Field">
+            <% if(player1.zone.field) { %>
+              <div class="card <%= player1.zone.field.faceUp ? '' : 'face-down' %>">
+                <img src="<%= player1.zone.field.card.image %>" />
+              </div>
+            <% } %>
+          </div>
+        </div>
+
+        <div class="mat-center">
+          <!-- Player Monster row is on top, closer to the center line -->
+          <div class="field-row">
+            <% player1.zone.monster.forEach((gameCard, index) => { %>
+              <div class="slot" data-label="M<%= index+1 %>">
+                <% if(gameCard) { %>
+                  <div class="card <%= gameCard.faceUp ? '' : 'face-down' %> <%= gameCard.position %>">
+                    <img src="<%= gameCard.card.image %>" />
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+
+          <!-- Player Spell/Trap row is on bottom, closer to the player hand -->
+          <div class="field-row">
+            <% player1.zone.spellTrap.forEach((gameCard, index) => { %>
+              <div class="slot" data-label="S/T<%= index+1 %>">
+                <% if(gameCard) { %>
+                  <div class="card <%= gameCard.faceUp ? '' : 'face-down' %>">
+                    <img src="<%= gameCard.card.image %>" />
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+
+        <!-- Player Right Side: GY on top, Deck on bottom -->
+        <div class="mat-side">
+          <div class="slot" data-label="GY (<%= player1.zone.graveyard.length %>)">
+            <% if(player1.zone.graveyard.length > 0) { %>
+              <div class="card"><img src="<%= player1.zone.graveyard[player1.zone.graveyard.length - 1].card.image %>" /></div>
+            <% } %>
+          </div>
+          <div class="slot unique-deck-slot" data-label="Deck">
+            <% if(player1.zone.deck.length > 0) { %> 
+              <div class="card face-down"></div> 
+              <span class="deck-counter"><%= player1.zone.deck.length %></span>
+            <% } %>
+          </div>
+        </div>
+      </div>
+
+      <div class="hand">
+        <% player1.zone.hand.forEach(gameCard => { %>
+          <div class="card">
+            <img src="<%= gameCard.card.image %>" />
+          </div>
+        <% }) %>
+      </div>
+    </div>
+
+  </div>
 
 </body>
 </html>

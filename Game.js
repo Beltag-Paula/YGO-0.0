@@ -1,36 +1,3 @@
-// class Game {
-//   constructor(player1, player2) {
-//     this.player1 = player1;
-//     this.player2 = player2;
-//   }
-
-//   start() {
-//     console.log(`Before shufflling`);
-//     console.log(`${this.player1.name} has ${this.player1.zone.hand.length} in their hand`);
-//     console.log(`${this.player1.name} has ${this.player1.zone.deck.length} in their deck`);
-//     console.log(`${this.player2.name} has ${this.player2.zone.hand.length} in their hand`);
-//     console.log(`${this.player2.name} has ${this.player2.zone.deck.length} in their deck`);
-
-//     this.player1.shuffleDeck();
-//     this.player2.shuffleDeck();
-//     console.log(`After shuffling`);
-
-//     this.player1.drawCard(5);
-//     this.player2.drawCard(5);
-//     console.log(`Both players drew 5 cards`);
-
-//     console.log(`${this.player1.name} has ${this.player1.zone.hand.map(c => c.card.name)} in their hand`);
-//     console.log(`${this.player2.name} has ${this.player2.zone.hand.map(c => c.card.name)} in their hand`);
-
-//     console.log(`Final check`);
-//     console.log(`${this.player1.name} has ${this.player1.zone.hand.length} in their hand`);
-//     console.log(`${this.player1.name} has ${this.player1.zone.deck.length} in their deck`);
-//     console.log(`${this.player2.name} has ${this.player2.zone.hand.length} in their hand`);
-//     console.log(`${this.player2.name} has ${this.player2.zone.deck.length} in their deck`);
-
-//   }
-// }
-
 const Player = require("./Player");
 
 

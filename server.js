@@ -7,12 +7,15 @@ const path = require('path');
 const app = express();
 const PORT = 3000;
 
+const gameRoutes =  require("./route/game.js");
+
 const {buildDeckJSON} = require('./gimmeDeck.js');
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(express.urlencoded({ extended: true }));
+
 
 app.get('/', (request, response) => {
     response.render("index", {currentPage:'home'});
@@ -47,9 +50,8 @@ app.post("/upload", upload.single("deck"), async (request, response) => {
   }
 });
 
-app.get("/game", (request, response) =>{
-    response.render("game", {currentPage:'game'});
-})
+app.use("/game", gameRoutes);
+
 app.listen(PORT, () => {
     console.log(`http://localhost:${PORT}/`);
 })

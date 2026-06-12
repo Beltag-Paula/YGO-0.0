@@ -46,8 +46,9 @@ class GameCard {
 
         //2nd turn
         this.state = {
-            hasAttacked: false, //if the monster attacked yet or not
-            effectUsedThisTurn: false //if the monster has used their effect not
+            hasAttackedThisTurn: false, //if the monster attacked yet or not
+            hasUsedEffectThisTurn: false, //if the monster has used their effect not
+            hasBennSummonedThisTurn: false
         }
 
         //spell-trap state

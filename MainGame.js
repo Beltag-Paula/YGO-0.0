@@ -1,3 +1,5 @@
+const ZoneManager = require("./ZoneManager");
+
 class MainGame {
     constructor(player1, player2) {
         this.player1 = player1;
@@ -11,14 +13,16 @@ class MainGame {
         this.phase = "draw";
 
         this.firstTurn = true;
+
+        this.playerHasNormalSummoned = false;
     }
 
     startDuel() {
-        this.player1.shuffleDeck();
-        this.player2.shuffleDeck();
+        this.currentPlayer.shuffleDeck();
+        this.opponentPlayer.shuffleDeck();
 
-        this.player1.drawCard(5);
-        this.player2.drawCard(5);
+        this.currentPlayer.drawCard(5);
+        this.opponentPlayer.drawCard(5);
 
         this.turn = 1;
 

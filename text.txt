@@ -1,43 +1,224 @@
-Player
- cards
- hand
- zones
- LP
+I. Card
+1st: CardLogic.js 
+CardLogic.js defines the core blueprint for a ygo card; It cointans two classes Card & GameCard;
+CardLogic.js splits the card into two distinct concepts but both important for how the game is played:
+-> first concept is the static representation of a card (class Card); in simpler terms is the physical traits
+of the card (the id, name, type, frameType, description, race, attack, defense, level, attribute),
+basically everything that is present on the card (note to myself in the future, add the image of a card for better representation)
+-> second concept is the dynamic representation of a card (class GameCard);
+It is the card that is being used/played in a game. 
+It wraps around the static concept, and in theory should track every change of that card during gameplay;
+So when you create a new GameCard(card, owner), it tracks:
+    --> the static physical representation of the card, and who owns it;
+    --> the location, where it is on the board
+(in hand of the owner, in deck waiting to be drawn, on the monster or spell-trap zone, on the graveyard, or in the banished zone, *!fusion zone);
+*zoneIndex will be used since the monster + spell-trap zone have only 5 fields;
+    **monster cards
+    --> the faceUp or faceDown
+    --> the position: attack or defense;
+    --> for a monster, we should know if it was normal summoned already that turn, if they attacked that turn and if they used their effect or not
+    **spell-trap cards
+    --> if the card was set
+    --> if the cards was activated
+    *** this one is a special case for monster that might be changed and deleted; so basically during the gameplay they might get their stats changed, or can't attack or even can't be destroyed, 
+    this is still as a reminder in case it gets complicated;
+    might need to add even the change attribute due to card DNA Changer
+Now you may ask why is written like this? By separating the static from the dynamic of a card, the game doesn't have to reload card text or image URL every time a card moves.
+If a monster get's let's say a boost of 500 attack from a equipped spell card, the game updates only GameCard.modifiers.atk = 500, while the original Card.atk remaines safely untouched by this modify.
 
-Game
- current turn
- current phase
- chain
- attacks
- events
- rules
+=========================================================================================
 
+II. Deck
+Now that the cards can be represented as objects, we need players that have decks
 
+For decks will use the decks from the YGOPRO deck;
+Please see the (gimmeDeck.js + server.js + upload.ejs) that is used to fetch the deck and format it
+into JSON
+These are the two guinea pigs used: 
+https://ygoprodeck.com/deck/kaiba-mazo-classic-editado-713053#/
+https://ygoprodeck.com/deck/yugi-op-714298#/
 
-Effect engine (you build this)
-You define reusable effect primitives:
-Examples:
-destroy(target)
-draw(player, n)
-specialSummon(target, zone)
-changeControl(target)
-negate(event)
-modifyATK(target, value)
-preventBattleDamage(player, duration)
+=========================================================================================
 
-const cardEffects = {
-  83764718: (game, card, context) => {
-    // Monster Reborn
-    const target = context.selectTarget({
-      zone: "GY",
-      type: "monster"
-    });
+The decks were fetched and saved as JSON files into deck_invetory folder,
+I renamed them mannually to be more easily to distinguish between them.
 
-    game.specialSummon(target, context.player);
-  },
+Ok, let's look closely what is inside this JSON file: 
+{
+  "mainDeck": [{
+      "id": 24611934,
+      "name": "Ryu-Kishin Powered",
+      "typeline": [
+        "Fiend",
+        "Normal"
+      ],
+      "type": "Normal Monster",
+      "humanReadableCardType": "Normal Monster",
+      "frameType": "normal",
+      "desc": "A gargoyle enhanced by the powers of darkness. Very sharp talons make it a worthy opponent.",
+      "race": "Fiend",
+      "atk": 1600,
+      "def": 1200,
+      "level": 4,
+      "attribute": "DARK",
+      "ygoprodeck_url": "https://ygoprodeck.com/card/ryu-kishin-powered-2124",
+      "card_images": [
+        {
+          "id": 24611934,
+          "image_url": "https://images.ygoprodeck.com/images/cards/24611934.jpg",
+          "image_url_small": "https://images.ygoprodeck.com/images/cards_small/24611934.jpg",
+          "image_url_cropped": "https://images.ygoprodeck.com/images/cards_cropped/24611934.jpg"
+        }
+      ]
+    },
+    {
+      "id": 24094653,
+      "name": "Polymerization",
+      "type": "Spell Card",
+      "humanReadableCardType": "Normal Spell",
+      "frameType": "spell",
+      "desc": "Fusion Summon 1 Fusion Monster from your Extra Deck, using monsters from your hand or field as Fusion Material.",
+      "race": "Normal",
+      "ygoprodeck_url": "https://ygoprodeck.com/card/polymerization-2077",
+      "card_images": [
+        {
+          "id": 24094653,
+          "image_url": "https://images.ygoprodeck.com/images/cards/24094653.jpg",
+          "image_url_small": "https://images.ygoprodeck.com/images/cards_small/24094653.jpg",
+          "image_url_cropped": "https://images.ygoprodeck.com/images/cards_cropped/24094653.jpg"
+        }
+      ]
+    },
+     {
+      "id": 83555666,
+      "name": "Ring of Destruction",
+      "type": "Trap Card",
+      "humanReadableCardType": "Normal Trap",
+      "frameType": "trap",
+      "desc": "During your opponent's turn: Target 1 face-up monster your opponent controls whose ATK is less than or equal to their LP; destroy that face-up monster, and if you do, take damage equal to its original ATK, then inflict damage to your opponent, equal to the damage you took. You can only activate 1 \"Ring of Destruction\" per turn.",
+      "race": "Normal",
+      "ygoprodeck_url": "https://ygoprodeck.com/card/ring-of-destruction-7013",
+      "banlist_info": {
+        "ban_goat": "Limited"
+      },
+      "card_images": [
+        {
+          "id": 83555666,
+          "image_url": "https://images.ygoprodeck.com/images/cards/83555666.jpg",
+          "image_url_small": "https://images.ygoprodeck.com/images/cards_small/83555666.jpg",
+          "image_url_cropped": "https://images.ygoprodeck.com/images/cards_cropped/83555666.jpg"
+        }
+      ]
+    }
+  ],
 
-  55144522: (game, card, context) => {
-    // Pot of Greed
-    game.draw(context.player, 2);
-  }
-};
+ "extraDeck": [
+    {
+      "id": 23995346,
+      "name": "Blue-Eyes Ultimate Dragon",
+      "typeline": [
+        "Dragon",
+        "Fusion"
+      ],
+      "type": "Fusion Monster",
+      "humanReadableCardType": "Fusion Monster",
+      "frameType": "fusion",
+      "desc": "\"Blue-Eyes White Dragon\" + \"Blue-Eyes White Dragon\" + \"Blue-Eyes White Dragon\"",
+      "race": "Dragon",
+      "atk": 4500,
+      "def": 3800,
+      "level": 12,
+      "attribute": "LIGHT",
+      "archetype": "Blue-Eyes",
+      "ygoprodeck_url": "https://ygoprodeck.com/card/blue-eyes-ultimate-dragon-2067",
+      "card_images": [
+        {
+          "id": 23995346,
+          "image_url": "https://images.ygoprodeck.com/images/cards/23995346.jpg",
+          "image_url_small": "https://images.ygoprodeck.com/images/cards_small/23995346.jpg",
+          "image_url_cropped": "https://images.ygoprodeck.com/images/cards_cropped/23995346.jpg"
+        }
+      ]
+    }
+  ],
+  "sideDeck": []
+}
+
+For more simplicity I took a simple sample of cards;
+The JSON format is made of: mainDeck that contains an array of cards, as well the extraDeck and sideDeck;
+
+=================================================================================================
+
+deckBuilder.js with it's function buildDeckForPlayer(json_deck, player),
+this function maps the json into: Arrays of objects: mainDeck, extraDeck and sideDeck,
+the objects are just new Card(card) that is wrapped inside GameCard(card, player);
+                1. RAW DATA (from JSON)
+                { "name": "Ryu-Kishin Powered", "atk": 1600, ... }
+                        │
+                        ▼
+                2. NEW CARD (The Blueprint)
+                Card { name: "Ryu-Kishin Powered", atk: 1600 }
+                        │
+                        ▼
+                3. NEW GAMECARD (The Game Piece)
+                GameCard {
+                    card: Card { name: "Ryu-Kishin Powered", atk: 1600 },
+                    owner: Player { name: "Kaiba", ... },
+                    location: "deck",
+                    faceUp: false,
+                    ...
+                }
+    so this function just returns Arrays of Objects GameCard, that will be used by the next class, class Player;
+
+=================================================================================================
+
+III. Player
+the constructor (a player must have a name and a deck)
+also when playing we need to start with LP of 8000,
+also player has a playmat (the playmat contains: hand zone, deck zone, monster zone, spell-trap zone, field zone for a field spell, extra deck zone, graveyard zone and banished zone) (note to myself in the future, add an image of a playmat from the DM era);
+
+the deck that we just made earlier? those Arrays of GameCard objects?
+those arrays will be stored here: 
+
+                    this.zone.deck = deck.mainDeck;
+                    this.zone.extraDeck = deck.extraDeck;
+                    this.zone.sideDeck = deck.sideDeck;
+
+Knows how to shuffle their deck and draw card
+=================================================================================================
+
+IV ZoneManager.js
+are the hands that move the cards during gameplay;
+in tcgs the gameplay is also the flow/movement of the cards,things like:
+- drawing a card = move(card,from deck, to hand);
+- summoning/setting a monster =if card.card. move(card, from hand, to hand) *faceUp/faceDown  
+- setting a trap
+- activating a spell card
+- battling a monster 
+
+that means ZoneManager shoud: 
+- move cards between zones
+- remove cards safely
+- auto-place into monster/spell zones
+- enforce “5-slot limit”
+- maintain location + zoneIndex
+
+let's recap:
+                  Player - is like a storage a player has when they come to a game
+                  ├─ LP
+                  ├─ zones (deck + extraDeck initialized with cards)
+                  ├─ draw()
+                  └─ shuffle()
+
+                  ZoneManager - is like player's hands, that can move cards during a game
+                  ├─ removeCard()
+                  ├─ addCard()
+                  └─ moveCard()
+
+                  MainGame - is like the referee which decides if u can: summon,activate,draw,attack etc during a game
+                  ├─ turns
+                  ├─ phases
+                  ├─ summon rules
+                  ├─ battle rules
+                  ├─ effect rules
+                  └─ uses ZoneManager

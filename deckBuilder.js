@@ -10,15 +10,15 @@ function buildDeckForPlayer(json_deck, player) {
         return new GameCard(card, player);
     });
 
-    const extraDeck = json_deck.extraDeck.map(cardData => {
+    const extraDeck = (json_deck.extraDeck || []).map(cardData => {
         const card = new Card(cardData);
         return new GameCard(card, player);
-    })
+    });
 
-    const sideDeck = json_deck.sideDeck.map(cardData => {
+    const sideDeck = (json_deck.sideDeck || []).map(cardData => {
         const card = new Card(cardData);
         return new GameCard(card, player);
-    })
+    });
 
     return { mainDeck, extraDeck, sideDeck };
 }

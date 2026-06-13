@@ -187,7 +187,9 @@ those arrays will be stored here:
 Knows how to shuffle their deck and draw card
 =================================================================================================
 
-IV ZoneManager.js
+IV ├─ removeCard()
+   ├─ addCard()
+   └─ moveCard() present in Player
 are the hands that move the cards during gameplay;
 in tcgs the gameplay is also the flow/movement of the cards,things like:
 - drawing a card = move(card,from deck, to hand);
@@ -196,7 +198,7 @@ in tcgs the gameplay is also the flow/movement of the cards,things like:
 - activating a spell card
 - battling a monster 
 
-that means ZoneManager shoud: 
+that means shoud: 
 - move cards between zones
 - remove cards safely
 - auto-place into monster/spell zones
@@ -210,10 +212,6 @@ let's recap:
                   ├─ draw()
                   └─ shuffle()
 
-                  ZoneManager - is like player's hands, that can move cards during a game
-                  ├─ removeCard()
-                  ├─ addCard()
-                  └─ moveCard()
 
                   MainGame - is like the referee which decides if u can: summon,activate,draw,attack etc during a game
                   ├─ turns
@@ -222,3 +220,10 @@ let's recap:
                   ├─ battle rules
                   ├─ effect rules
                   └─ uses ZoneManager
+
+                  is like player's hands, that can move cards during a game
+                  ├─ removeCard()
+                  ├─ addCard()
+                  └─ moveCard()
+
+

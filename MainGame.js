@@ -1,3 +1,5 @@
+const Effects = require("./Effects.js");
+
 class MainGame {
     constructor(player1, player2) {
         this.player1 = player1;
@@ -9,11 +11,36 @@ class MainGame {
         this.turn = 1;
         this.phase = "draw";
         this.firstTurn = true;
+        this.gameOver = false;
+        this.winner = null;
+
+        // Rolling duel log, most-recent-last, capped for the UI.
+        this.log = [];
+
+        // Battle Response Window state (set while an attack has been
+        // declared but the defender may still activate a Set Spell/Trap
+        // before damage is calculated).
+        this.pendingAttack = null;     // { attacker, target }
+        this.battleResponse = null;    // { defender }
+        this.attackNegated = false;
+        this.forceEndBattlePhase = false;
+        this.reflectDamage = 0;                 // Magic Cylinder-style reflected damage
+        this.preventBattleDamageFor = null;     // Waboku: player who takes no battle damage this turn
+        this.preventDestructionFor = null;      // Waboku: player whose monsters can't be destroyed by battle this turn
+        this.lastBattleEvent = null;            // structured info for the UI: who attacked whom, for how much
+        this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
 
         this.state = {
             waitingForAction: false,
-            actedThisWindow: false
+            actedThisWindow: false,
+            awaitingResponse: false
         };
+    }
+
+    addLog(msg) {
+        this.log.push(msg);
+        if (this.log.length > 40) this.log.shift();
+        console.log(msg);
     }
 
     startDuel() {
@@ -23,12 +50,13 @@ class MainGame {
         this.currentPlayer.drawCard(5);
         this.opponentPlayer.drawCard(5);
 
-        console.log("=== DUEL START ===");
+        this.addLog("=== DUEL START ===");
         this.renderPlaymat();
     }
 
-    // CRITICAL FIX: Restored missing "m1" phase handling 
     nextPhase() {
+        if (this.gameOver) return;
+
         switch (this.phase) {
             case "draw":
                 this.drawPhase();
@@ -53,9 +81,13 @@ class MainGame {
     }
 
     drawPhase() {
-        // Turn 1 rules: In classic/modern rules, player 1 may or may not draw. 
-        // Defaulting to standard draw engine logic.
-        this.currentPlayer.drawCard(1);
+        // Standard rule: the player going first does not draw on turn 1.
+        if (this.firstTurn && this.turn === 1) {
+            this.addLog(`${this.currentPlayer.name} skips their first Draw Phase (going first).`);
+        } else {
+            this.currentPlayer.drawCard(1);
+            this.addLog(`${this.currentPlayer.name} draws a card.`);
+        }
         this.phase = "standby";
     }
 
@@ -63,22 +95,76 @@ class MainGame {
         this.phase = "m1";
     }
 
-    // CRITICAL FIX: No longer altering phase value to "idle"
     mainPhase1() {
-        console.log(`\n--- MAIN1 (${this.currentPlayer.name}'s Action Turn) ---`);
+        this.addLog(`\n--- MAIN 1 (${this.currentPlayer.name}) ---`);
         this.state.waitingForAction = true;
-        this.state.actedThisWindow = false;
+        // Reflect whatever summon/set usage already happened this turn
+        // (relevant when re-entering an action window, e.g. Main Phase 2)
+        this.state.actedThisWindow = this.currentPlayer.normalSummonedThisTurn;
     }
 
+    // Main Phase 2 behaves like Main Phase 1: you can summon/set (if you
+    // haven't already this turn), change monster positions, play spells,
+    // and pass.
+    mainPhase2() {
+        this.addLog(`\n--- MAIN 2 (${this.currentPlayer.name}) ---`);
+        this.state.waitingForAction = true;
+        this.state.actedThisWindow = this.currentPlayer.normalSummonedThisTurn;
+    }
+
+    battlePhase() {
+        this.addLog(`\n--- BATTLE PHASE (${this.currentPlayer.name}) ---`);
+        this.state.waitingForAction = true;
+    }
+
+    // ------------------------------------------------------------------
+    // DISPATCH — the single entry point for every player-driven action
+    // ------------------------------------------------------------------
     dispatch(action) {
+        if (this.gameOver) return;
         if (!this.state.waitingForAction) return;
+
+        // While a Battle Response Window is open, only the defender may
+        // act, and only by activating a Set card or passing.
+        if (this.state.awaitingResponse) {
+            if (action.type === "ACTIVATE_SET_CARD") {
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, true);
+            } else if (action.type === "PASS_RESPONSE") {
+                this.resolveBattleDamage();
+            }
+            return;
+        }
+
+        const inMainPhase = this.phase === "m1" || this.phase === "m2";
 
         switch (action.type) {
             case "NORMAL_SUMMON":
-                this.normalSummon(
-                    action.payload.card,
-                    action.payload.tributeIndices
-                );
+                if (!inMainPhase) return;
+                this.normalSummon(action.payload.card, action.payload.tributeIndices || []);
+                break;
+            case "SET_MONSTER":
+                if (!inMainPhase) return;
+                this.setMonster(action.payload.card, action.payload.tributeIndices || []);
+                break;
+            case "CHANGE_POSITION":
+                if (!inMainPhase) return;
+                this.changeBattlePosition(action.payload.card);
+                break;
+            case "ACTIVATE_SPELL":
+                if (!inMainPhase) return;
+                this.activateSpellFromHand(action.payload.card, action.payload.targetInstanceId || null);
+                break;
+            case "SET_SPELL_TRAP":
+                if (!inMainPhase) return;
+                this.setSpellTrap(action.payload.card);
+                break;
+            case "ACTIVATE_SET_CARD":
+                if (!inMainPhase) return; // response-window case handled above
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, false);
+                break;
+            case "ATTACK":
+                if (this.phase !== "battle") return;
+                this.declareAttack(action.payload.attacker, action.payload.target || null);
                 break;
             case "PASS":
                 this.endActionWindow();
@@ -88,19 +174,35 @@ class MainGame {
 
     endActionWindow() {
         this.state.waitingForAction = false;
-        if (this.firstTurn) {
+
+        if (this.phase === "m1") {
+            // No battle phase on the very first turn of the whole duel
+            this.phase = this.firstTurn ? "end" : "battle";
+        } else if (this.phase === "battle") {
+            this.phase = "m2";
+        } else if (this.phase === "m2") {
             this.phase = "end";
-        } else {
-            this.phase = "battle";
         }
     }
 
+    // ------------------------------------------------------------------
+    // MONSTER ZONE
+    // ------------------------------------------------------------------
     isMonster(gc) {
         return (
             gc.card.type.includes("Monster") ||
             gc.card.frameType === "normal" ||
             gc.card.frameType === "effect"
         );
+    }
+
+    isSpellOrTrap(gc) {
+        return gc.card.type.includes("Spell") || gc.card.type.includes("Trap");
+    }
+
+    // Convenience for the view layer — avoids requiring Effects.js in EJS.
+    getCardMeta(cardName) {
+        return Effects.getMeta(cardName);
     }
 
     getRequiredTributes(level) {
@@ -115,15 +217,13 @@ class MainGame {
 
         if (!this.isMonster(gc)) return false;
         if (p.normalSummonedThisTurn) return false;
-        
-        // Verify card instance actually exists in hand
+
         const hasCard = p.zone.hand.some(c => c.instanceId === gc.instanceId);
         if (!hasCard) return false;
 
         return p.getFreeMonsterSlot() !== -1;
     }
 
-    // CRITICAL FIX: Rewritten completely to protect references across arrays
     normalSummon(gc, tributeIndices = []) {
         const p = this.currentPlayer;
 
@@ -133,7 +233,6 @@ class MainGame {
         const required = this.getRequiredTributes(gc.card.level);
         if (tributeIndices.length !== required) return false;
 
-        // 1. Map lookups safely out of slot indices
         const tributesToProcess = [];
         for (const idx of tributeIndices) {
             const monsterToken = p.zone.monster[idx];
@@ -141,15 +240,12 @@ class MainGame {
             tributesToProcess.push(monsterToken);
         }
 
-        // 2. Clear out cards using unified helper pipelines
         for (const tributeCard of tributesToProcess) {
             p.moveCard(tributeCard, "monster", "graveyard");
         }
 
-        // 3. Move summoned monster out of hand using clean API layer
         p.moveCard(gc, "hand", "monster");
 
-        // 4. Update the state tokens directly on the instance card wrapper
         gc.faceUp = true;
         gc.position = "attack";
         gc.state.hasBeenSummonedThisTurn = true;
@@ -157,25 +253,429 @@ class MainGame {
         p.normalSummonedThisTurn = true;
         this.state.actedThisWindow = true;
 
-        console.log(`Summoned: ${gc.card.name} (SLOT ${gc.zoneIndex})`);
+        this.addLog(`⭐ ${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
         return true;
     }
 
-    battlePhase() {
-        this.phase = "m2";
+    // Set a monster face-down in defense position. Shares the "one Normal
+    // Summon/Set per turn" restriction and tribute rules with normalSummon.
+    setMonster(gc, tributeIndices = []) {
+        const p = this.currentPlayer;
+
+        if (!this.canNormalSummon(gc)) return false;
+        if (this.state.actedThisWindow) return false;
+
+        const required = this.getRequiredTributes(gc.card.level);
+        if (tributeIndices.length !== required) return false;
+
+        const tributesToProcess = [];
+        for (const idx of tributeIndices) {
+            const monsterToken = p.zone.monster[idx];
+            if (!monsterToken) return false;
+            tributesToProcess.push(monsterToken);
+        }
+
+        for (const tributeCard of tributesToProcess) {
+            p.moveCard(tributeCard, "monster", "graveyard");
+        }
+
+        p.moveCard(gc, "hand", "monster");
+
+        gc.faceUp = false;
+        gc.position = "defense";
+        gc.state.hasBeenSummonedThisTurn = true;
+
+        p.normalSummonedThisTurn = true;
+        this.state.actedThisWindow = true;
+
+        this.addLog(`🂠 ${p.name} sets a monster face-down in Defense Position.`);
+        return true;
     }
 
-    mainPhase2() {
-        this.phase = "end";
+    canChangePosition(gc) {
+        if (!gc || gc.location !== "monster" || gc.owner !== this.currentPlayer) return false;
+        if (gc.state.hasChangedPositionThisTurn) return false;
+        if (gc.state.hasAttackedThisTurn) return false;
+        if (gc.state.hasBeenSummonedThisTurn) return false;
+        if (gc.modifiers?.cannotChangePosition) return false;
+        return true;
     }
 
+    changeBattlePosition(gc) {
+        if (!this.canChangePosition(gc)) return false;
+
+        gc.position = gc.position === "attack" ? "defense" : "attack";
+        gc.faceUp = true;
+        gc.state.hasChangedPositionThisTurn = true;
+
+        this.addLog(`🔄 ${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
+        return true;
+    }
+
+    getAtk(gc) {
+        return Math.max(0, (gc.card.atk || 0) + (gc.modifiers?.atk || 0));
+    }
+
+    getDef(gc) {
+        return Math.max(0, (gc.card.def || 0) + (gc.modifiers?.def || 0));
+    }
+
+    canAttack(gc) {
+        if (this.gameOver) return false;
+        if (!gc || gc.location !== "monster" || gc.owner !== this.currentPlayer) return false;
+        if (!gc.faceUp || gc.position !== "attack") return false;
+        if (gc.state.hasAttackedThisTurn) return false;
+        if (gc.modifiers?.cannotAttack) return false;
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // BATTLE — declare -> (optional) response window -> damage
+    // ------------------------------------------------------------------
+    getEligibleResponses(player) {
+        return player.getSpellTrapsOnField().filter(gc => {
+            if (gc.faceUp) return false; // only Set (face-down) cards can ambush
+            const meta = Effects.getMeta(gc.card.name);
+            if (!meta) return false;
+            if (meta.kind === "trap" && gc.turnSet === this.turn) return false;
+            return meta.window === "response" || meta.window === "anytime";
+        });
+    }
+
+    declareAttack(attacker, target = null) {
+        if (!this.canAttack(attacker)) return false;
+
+        const defender = this.opponentPlayer;
+        const defenderMonsters = defender.getMonstersOnField();
+
+        if (!target && defenderMonsters.length > 0) {
+            this.addLog(`❌ ${attacker.card.name} cannot attack directly while ${defender.name} controls monsters.`);
+            return false;
+        }
+        if (target && (target.owner !== defender || target.location !== "monster")) return false;
+
+        attacker.state.hasAttackedThisTurn = true;
+        this.pendingAttack = { attacker, target };
+
+        if (target) {
+            this.addLog(`⚔️  ${attacker.card.name} declares an attack on ${target.card.name}!`);
+        } else {
+            this.addLog(`⚔️  ${attacker.card.name} declares a direct attack!`);
+        }
+
+        const eligible = this.getEligibleResponses(defender);
+        if (eligible.length > 0) {
+            this.battleResponse = { defender };
+            this.state.awaitingResponse = true;
+            this.addLog(`${defender.name} may activate a Set Spell/Trap Card in response.`);
+            return true;
+        }
+
+        this.resolveBattleDamage();
+        return true;
+    }
+
+    resolveBattleDamage() {
+        const pending = this.pendingAttack;
+        this.pendingAttack = null;
+        this.battleResponse = null;
+        this.state.awaitingResponse = false;
+
+        if (!pending) return;
+        const { attacker, target } = pending;
+
+        const event = {
+            attackerName: attacker.card.name,
+            attackerImage: attacker.card.image,
+            targetName: target ? target.card.name : null,
+            targetImage: target ? target.card.image : null,
+            wasDirect: !target,
+            damage: 0,
+            damagedPlayerIsPlayer1: null,
+            destroyedNames: []
+        };
+
+        const dealDamage = (player, amount) => {
+            if (amount <= 0) return 0;
+            if (this.preventBattleDamageFor === player) {
+                this.addLog(`🛡️ ${player.name} takes no battle damage this turn.`);
+                return 0;
+            }
+            player.dealDamage(amount);
+            return amount;
+        };
+
+        const destroy = (ownerPlayer, gc) => {
+            if (this.preventDestructionFor === ownerPlayer) {
+                this.addLog(`🛡️ ${gc.card.name} cannot be destroyed by battle this turn.`);
+                return false;
+            }
+            ownerPlayer.moveCard(gc, "monster", "graveyard");
+            event.destroyedNames.push(gc.card.name);
+            return true;
+        };
+
+        if (this.attackNegated) {
+            this.attackNegated = false;
+            this.addLog("The attack was negated — no damage is dealt.");
+            if (this.reflectDamage) {
+                const dmg = this.reflectDamage;
+                this.reflectDamage = 0;
+                const dealt = dealDamage(this.currentPlayer, dmg);
+                event.damage = dealt;
+                event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
+                if (dealt > 0) this.addLog(`💥 ${this.currentPlayer.name} takes ${dealt} reflected damage!`);
+            }
+        } else if (attacker.location !== "monster") {
+            this.addLog(`${attacker.card.name} was destroyed before damage could be applied.`);
+        } else if (!target) {
+            const dmg = this.getAtk(attacker);
+            const dealt = dealDamage(this.opponentPlayer, dmg);
+            event.damage = dealt;
+            event.damagedPlayerIsPlayer1 = this.opponentPlayer === this.player1;
+            this.addLog(`💥 ${attacker.card.name} hits directly for ${dealt} damage! (${this.opponentPlayer.name} LP: ${this.opponentPlayer.lifePoints})`);
+        } else if (target.location !== "monster") {
+            this.addLog(`The attack fizzles — ${target.card.name} is no longer on the field.`);
+        } else {
+            const defender = target.owner;
+            const atkVal = this.getAtk(attacker);
+
+            if (target.position === "attack") {
+                const defVal = this.getAtk(target);
+                if (atkVal > defVal) {
+                    destroy(defender, target);
+                    const dealt = dealDamage(defender, atkVal - defVal);
+                    event.damage = dealt;
+                    event.damagedPlayerIsPlayer1 = defender === this.player1;
+                    this.addLog(`💥 ${target.card.name} destroyed! ${defender.name} takes ${dealt} damage.`);
+                } else if (atkVal < defVal) {
+                    destroy(this.currentPlayer, attacker);
+                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
+                    event.damage = dealt;
+                    event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
+                    this.addLog(`💥 ${attacker.card.name} destroyed! ${this.currentPlayer.name} takes ${dealt} damage.`);
+                } else {
+                    destroy(defender, target);
+                    destroy(this.currentPlayer, attacker);
+                    this.addLog("💥 Both monsters are destroyed in the collision!");
+                }
+            } else {
+                const defVal = this.getDef(target);
+                const wasFaceDown = !target.faceUp;
+                target.faceUp = true;
+                if (wasFaceDown) this.addLog(`The set monster is revealed: ${target.card.name} (DEF ${defVal})!`);
+
+                if (atkVal > defVal) {
+                    destroy(defender, target);
+                    this.addLog(`💥 ${target.card.name} destroyed!`);
+                } else if (atkVal < defVal) {
+                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
+                    event.damage = dealt;
+                    event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
+                    this.addLog(`💥 ${this.currentPlayer.name} takes ${dealt} damage from the rebound!`);
+                } else {
+                    this.addLog("No monster destroyed (ATK = DEF).");
+                }
+            }
+        }
+
+        this.lastBattleEvent = event;
+
+        if (this.forceEndBattlePhase) {
+            this.forceEndBattlePhase = false;
+            this.phase = "m2";
+            this.mainPhase2();
+        }
+
+        this.checkForWinner();
+    }
+
+    checkForWinner() {
+        if (this.gameOver) return;
+
+        if (this.player1.lifePoints <= 0 || this.player2.lifePoints <= 0) {
+            this.gameOver = true;
+            this.state.waitingForAction = false;
+            this.winner = this.player1.lifePoints <= 0 ? this.player2 : this.player1;
+            this.addLog(`\n🏆🏆🏆 ${this.winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // SPELL / TRAP ZONE
+    // ------------------------------------------------------------------
+    transferCard(gc, fromPlayer, fromZone, toPlayer, toZone) {
+        fromPlayer.removeCard(gc, fromZone);
+        gc.owner = toPlayer;
+        toPlayer.addCard(gc, toZone);
+    }
+
+    findMonsterAnywhereOnField(instanceId) {
+        if (!instanceId) return null;
+        return (
+            this.player1.zone.monster.find(m => m && m.instanceId === instanceId) ||
+            this.player2.zone.monster.find(m => m && m.instanceId === instanceId) ||
+            null
+        );
+    }
+
+    findSpellTrapAnywhereOnField(instanceId) {
+        if (!instanceId) return null;
+        return (
+            this.player1.zone.spellTrap.find(m => m && m.instanceId === instanceId) ||
+            this.player2.zone.spellTrap.find(m => m && m.instanceId === instanceId) ||
+            null
+        );
+    }
+
+    findGraveyardMonster(instanceId) {
+        if (!instanceId) return null;
+        return (
+            this.player1.zone.graveyard.find(m => m.instanceId === instanceId && this.isMonster(m)) ||
+            this.player2.zone.graveyard.find(m => m.instanceId === instanceId && this.isMonster(m)) ||
+            null
+        );
+    }
+
+    resolveTarget(meta, targetInstanceId) {
+        if (!meta.needsTarget) return null;
+        if (meta.needsTarget === "monster") return this.findMonsterAnywhereOnField(targetInstanceId);
+        if (meta.needsTarget === "spellTrap") return this.findSpellTrapAnywhereOnField(targetInstanceId);
+        if (meta.needsTarget === "graveyardMonster") return this.findGraveyardMonster(targetInstanceId);
+        return null;
+    }
+
+    // Activates a Normal/Quick-Play/Continuous/Equip Spell straight from hand.
+    activateSpellFromHand(gc, targetInstanceId = null) {
+        const p = this.currentPlayer;
+        const hasCard = p.zone.hand.some(c => c.instanceId === gc.instanceId);
+        if (!hasCard) return false;
+
+        const meta = Effects.getMeta(gc.card.name);
+        if (!meta || meta.kind !== "spell") return false;
+        if (meta.window === "response") return false; // can't happen for spells in our set, but stay safe
+        if (meta.cost?.lp && p.lifePoints <= meta.cost.lp) {
+            this.addLog(`⚠️ Not enough Life Points to activate ${gc.card.name}.`);
+            return false;
+        }
+        if (p.getFreeSpellTrapSlot() === -1) return false;
+
+        const target = this.resolveTarget(meta, targetInstanceId);
+        if (meta.needsTarget && !target) {
+            this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
+            return false;
+        }
+
+        p.moveCard(gc, "hand", "spellTrap");
+        gc.faceUp = true;
+        gc.spellTrap.activated = true;
+
+        if (meta.cost?.lp) p.dealDamage(meta.cost.lp);
+
+        this.addLog(`📜 ${p.name} activates ${gc.card.name}!`);
+        Effects.activate(this, gc, target);
+
+        if (meta.subtype === "normal" || meta.subtype === "quickplay") {
+            p.moveCard(gc, "spellTrap", "graveyard");
+        }
+
+        this.checkForWinner();
+        return true;
+    }
+
+    // Sets any Spell or Trap face-down in the Spell/Trap Zone.
+    setSpellTrap(gc) {
+        const p = this.currentPlayer;
+        const hasCard = p.zone.hand.some(c => c.instanceId === gc.instanceId);
+        if (!hasCard) return false;
+        if (!this.isSpellOrTrap(gc)) return false;
+        if (p.getFreeSpellTrapSlot() === -1) return false;
+
+        p.moveCard(gc, "hand", "spellTrap");
+        gc.faceUp = false;
+        gc.turnSet = this.turn;
+
+        this.addLog(`🂠 ${p.name} sets a card face-down in the Spell/Trap Zone.`);
+        return true;
+    }
+
+    // Activates a face-down Spell/Trap already on the field. `isResponse`
+    // indicates this is happening inside a Battle Response Window.
+    activateSetCard(gc, targetInstanceId = null, isResponse = false) {
+        if (!gc || gc.location !== "spellTrap") return false;
+
+        const meta = Effects.getMeta(gc.card.name);
+        if (!meta) {
+            this.addLog(`${gc.card.name} has no programmed effect and cannot be activated.`);
+            return false;
+        }
+
+        const owner = gc.owner;
+
+        if (isResponse) {
+            if (!this.battleResponse || owner !== this.battleResponse.defender) return false;
+            if (meta.window !== "response" && meta.window !== "anytime") return false;
+        } else {
+            if (owner !== this.currentPlayer) return false;
+            if (this.phase !== "m1" && this.phase !== "m2") return false;
+            if (meta.window === "response") {
+                this.addLog(`${gc.card.name} can only be activated in response to an attack.`);
+                return false;
+            }
+        }
+
+        if (meta.kind === "trap" && gc.turnSet === this.turn) {
+            this.addLog(`${gc.card.name} cannot be activated the turn it was Set.`);
+            return false;
+        }
+        if (meta.cost?.lp && owner.lifePoints <= meta.cost.lp) {
+            this.addLog(`⚠️ Not enough Life Points to activate ${gc.card.name}.`);
+            return false;
+        }
+
+        const target = this.resolveTarget(meta, targetInstanceId);
+        if (meta.needsTarget && !target) {
+            this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
+            return false;
+        }
+
+        gc.faceUp = true;
+        gc.spellTrap.activated = true;
+        if (meta.cost?.lp) owner.dealDamage(meta.cost.lp);
+
+        this.addLog(`📜 ${owner.name} activates the set card ${gc.card.name}!`);
+        Effects.activate(this, gc, target);
+
+        if (meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") {
+            owner.moveCard(gc, "spellTrap", "graveyard");
+        }
+
+        if (isResponse) {
+            this.resolveBattleDamage();
+        }
+
+        this.checkForWinner();
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // TURN STRUCTURE
+    // ------------------------------------------------------------------
     endPhase() {
         this.endTurn();
     }
 
     endTurn() {
+        // Revert any "until the End Phase" effects (Change of Heart control,
+        // Reinforcements' ATK boost, Shrink's ATK halving, etc.)
+        this.turnEffects.forEach(fn => fn());
+        this.turnEffects = [];
+        this.preventBattleDamageFor = null;
+        this.preventDestructionFor = null;
+
         this.currentPlayer.normalSummonedThisTurn = false;
-        this.firstTurn = false; // Turn 1 actions resolved safely
+        this.currentPlayer.resetMonsterTurnFlags();
+        this.firstTurn = false;
 
         const tmp = this.currentPlayer;
         this.currentPlayer = this.opponentPlayer;
@@ -184,11 +684,13 @@ class MainGame {
         this.turn++;
         this.phase = "draw";
 
-        console.log(`\n=== TURN ${this.turn} ===`);
-        console.log(`${this.currentPlayer.name}'s turn`);
+        this.addLog(`\n=== TURN ${this.turn} — ${this.currentPlayer.name}'s turn ===`);
     }
 
     renderPlaymat() {
+        if (this.gameOver) {
+            console.log(`\n🏆 DUEL OVER — ${this.winner.name} WINS! 🏆`);
+        }
         console.log("\n=========== PLAYMAT ===========");
         this.renderPlayer(this.opponentPlayer, "TOP - Opponent");
         console.log("\n-------------------------------\n");
@@ -205,6 +707,12 @@ class MainGame {
         console.log(
             p.zone.monster
                 .map((c, i) => c ? `[${i}] ${c.card.name} (${c.position.toUpperCase()})` : `[${i}] EMPTY`)
+                .join(" | ")
+        );
+        console.log("SPELL/TRAP ZONE:");
+        console.log(
+            p.zone.spellTrap
+                .map((c, i) => c ? `[${i}] ${c.faceUp ? c.card.name : "Set Card"}` : `[${i}] EMPTY`)
                 .join(" | ")
         );
         console.log(`GRAVEYARD: ${p.zone.graveyard.length} cards`);

@@ -64,8 +64,16 @@ class Player {
     return this.zone.monster.findIndex(slot => slot === null);
   }
 
+  getFreeSpellTrapSlot() {
+    return this.zone.spellTrap.findIndex(slot => slot === null);
+  }
+
   getMonstersOnField() {
     return this.zone.monster.filter(slot => slot !== null);
+  }
+
+  getSpellTrapsOnField() {
+    return this.zone.spellTrap.filter(slot => slot !== null);
   }
 
   // CRITICAL FIX: Safe Zone Appending & Index Management
@@ -111,6 +119,25 @@ class Player {
   moveCard(card, fromZone, toZone) {
     this.removeCard(card, fromZone);
     this.addCard(card, toZone);
+  }
+
+  // Applies battle/effect damage, clamped so LP never goes negative
+  dealDamage(amount) {
+    if (amount <= 0) return this.lifePoints;
+    this.lifePoints = Math.max(0, this.lifePoints - amount);
+    return this.lifePoints;
+  }
+
+  // Called when it becomes this player's turn again: clears per-turn
+  // flags on every monster they control (attacked/summoned/position-changed)
+  resetMonsterTurnFlags() {
+    for (const gc of this.zone.monster) {
+      if (!gc) continue;
+      gc.state.hasAttackedThisTurn = false;
+      gc.state.hasBeenSummonedThisTurn = false;
+      gc.state.hasChangedPositionThisTurn = false;
+      gc.state.hasUsedEffectThisTurn = false;
+    }
   }
 }
 

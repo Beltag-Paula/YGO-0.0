@@ -43,7 +43,8 @@ class GameCard {
         this.state = {
             hasAttackedThisTurn: false,
             hasUsedEffectThisTurn: false,
-            hasBeenSummonedThisTurn: false
+            hasBeenSummonedThisTurn: false,
+            hasChangedPositionThisTurn: false
         };
 
         // Spell/Trap Flags
@@ -57,9 +58,18 @@ class GameCard {
             atk: 0,
             def: 0,
             cannotAttack: false,
+            cannotChangePosition: false,
             effectsNegated: false,
             indestructible: false
         };
+
+        // Turn number this card was Set (face-down), used to enforce
+        // "a Trap cannot be activated the turn it was Set".
+        this.turnSet = null;
+        // instanceId of whatever monster an Equip Spell is attached to
+        this.equippedTo = null;
+        // instanceId of whatever monster a Continuous Trap/Spell is targeting
+        this.linkedTarget = null;
     }
 }
 

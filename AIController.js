@@ -3,6 +3,12 @@
  * Heuristic (not "smart") AI. Each call performs AT MOST one dispatched
  * action for game.currentPlayer, then returns — callers loop this until
  * the AI passes/ends its window. Kept deliberately simple and readable.
+ *
+ * step()/the act* functions return { acted, visible }:
+ *   acted:   true if the AI did anything at all (including just passing)
+ *   visible: true if it was something worth showing the human before
+ *            moving on (summon, set, attack, activate) — false for a
+ *            bare PASS, which has nothing to display.
  */
 const Effects = require("./Effects.js");
 
@@ -19,7 +25,7 @@ function actMainPhase(game) {
 
             if (free) {
                 game.dispatch({ type: "NORMAL_SUMMON", payload: { card: free, tributeIndices: [] } });
-                return true;
+                return { acted: true, visible: true };
             }
 
             const big = summonable.sort((a, b) => (b.card.atk || 0) - (a.card.atk || 0))[0];
@@ -31,7 +37,7 @@ function actMainPhase(game) {
                     type: "NORMAL_SUMMON",
                     payload: { card: big, tributeIndices: occupied.slice(0, required) }
                 });
-                return true;
+                return { acted: true, visible: true };
             }
         }
     }
@@ -43,7 +49,7 @@ function actMainPhase(game) {
     });
     if (setCandidate && p.getFreeSpellTrapSlot() !== -1) {
         game.dispatch({ type: "SET_SPELL_TRAP", payload: { card: setCandidate } });
-        return true;
+        return { acted: true, visible: true };
     }
 
     // 3) Cast an instant-effect Normal Spell if it looks useful.
@@ -53,12 +59,12 @@ function actMainPhase(game) {
     });
     if (instantSpell && p.getFreeSpellTrapSlot() !== -1) {
         game.dispatch({ type: "ACTIVATE_SPELL", payload: { card: instantSpell } });
-        return true;
+        return { acted: true, visible: true };
     }
 
     // Nothing productive left to do — pass the window.
     game.dispatch({ type: "PASS" });
-    return true;
+    return { acted: true, visible: false };
 }
 
 function actBattlePhase(game) {
@@ -66,7 +72,7 @@ function actBattlePhase(game) {
 
     if (attackers.length === 0) {
         game.dispatch({ type: "PASS" });
-        return true;
+        return { acted: true, visible: false };
     }
 
     const attacker = attackers.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
@@ -74,7 +80,7 @@ function actBattlePhase(game) {
 
     if (defenderMonsters.length === 0) {
         game.dispatch({ type: "ATTACK", payload: { attacker, target: null } });
-        return true;
+        return { acted: true, visible: true };
     }
 
     const beatable = defenderMonsters.filter(t => game.getAtk(attacker) > game.getAtk(t));
@@ -83,7 +89,7 @@ function actBattlePhase(game) {
         : defenderMonsters.sort((a, b) => game.getAtk(a) - game.getAtk(b))[0];
 
     game.dispatch({ type: "ATTACK", payload: { attacker, target } });
-    return true;
+    return { acted: true, visible: true };
 }
 
 // Called when the AI is the DEFENDER during a Battle Response Window.
@@ -100,7 +106,7 @@ function actBattleResponse(game) {
 
     if (!priority) {
         game.dispatch({ type: "PASS_RESPONSE" });
-        return true;
+        return { acted: true, visible: false };
     }
 
     const meta = Effects.getMeta(priority.card.name);
@@ -120,31 +126,32 @@ function actBattleResponse(game) {
 
     if (meta.needsTarget && !targetInstanceId) {
         game.dispatch({ type: "PASS_RESPONSE" });
-        return true;
+        return { acted: true, visible: false };
     }
 
     game.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card: priority, targetInstanceId } });
-    return true;
+    return { acted: true, visible: true };
 }
 
 /**
- * Runs the AI's turn/response forward one atomic step. Returns true if it
- * did something (caller should loop again), false if there was nothing to do.
+ * Runs the AI's turn/response forward one atomic step. Returns
+ * { acted, visible } — see file header. { acted: false } means there
+ * was nothing for the AI to do right now (not its window).
  */
 function step(game) {
-    if (game.gameOver) return false;
+    if (game.gameOver) return { acted: false, visible: false };
 
     if (game.state.awaitingResponse) {
-        if (game.battleResponse.defender === game.currentPlayer) return false; // not AI's response to make
+        if (game.battleResponse.defender === game.currentPlayer) return { acted: false, visible: false };
         return actBattleResponse(game);
     }
 
-    if (!game.state.waitingForAction) return false;
+    if (!game.state.waitingForAction) return { acted: false, visible: false };
 
     if (game.phase === "m1" || game.phase === "m2") return actMainPhase(game);
     if (game.phase === "battle") return actBattlePhase(game);
 
-    return false;
+    return { acted: false, visible: false };
 }
 
 module.exports = { step };

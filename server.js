@@ -69,6 +69,23 @@ app.post("/upload", upload.single("deck"), async (request, response) => {
 app.use("/game", gameRoutes);
 
 // ---------------------------------------------------------
+// GLOBAL ERROR HANDLER (CRITICAL: keeps the server alive)
+// A bug in one card effect should never take the whole duel down.
+// Express routes synchronous throws in route handlers here automatically.
+// ---------------------------------------------------------
+app.use((err, req, res, next) => {
+    console.error("Unhandled error on", req.method, req.originalUrl, ":", err);
+    res.status(500).send(
+        `<html><body style="background:#111;color:#fff;font-family:sans-serif;padding:40px;">` +
+        `<h2>Something went wrong</h2>` +
+        `<p>An unexpected error occurred. The duel state is unaffected — you can go back and keep playing.</p>` +
+        `<p><a href="/game" style="color:#0cf;">Return to the duel</a></p>` +
+        `<pre style="color:#888;font-size:11px;white-space:pre-wrap;">${(err && err.stack) || err}</pre>` +
+        `</body></html>`
+    );
+});
+
+// ---------------------------------------------------------
 // SERVER SOCKET LISTENER (CRITICAL FIX: Syntax error cleared)
 // ---------------------------------------------------------
 app.listen(PORT, () => {

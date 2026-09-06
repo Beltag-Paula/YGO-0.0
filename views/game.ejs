@@ -46,6 +46,30 @@
       color: #04141c;
       box-shadow: 0 0 12px rgba(0,212,255,0.7);
     }
+    .phase-icon-btn {
+      width: 100%;
+      font-family: inherit;
+      cursor: pointer;
+      animation: phasePulse 1.4s ease-in-out infinite;
+    }
+    .phase-icon-btn:hover { box-shadow: 0 0 18px rgba(255,204,0,0.8); }
+    @keyframes phasePulse {
+      0%, 100% { box-shadow: 0 0 12px rgba(0,212,255,0.7); }
+      50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); }
+    }
+    /* A future phase you can jump straight to — clickable, but visually
+       distinct from the pulsing "current phase, click to pass" button. */
+    .phase-icon-jump {
+      background: linear-gradient(180deg, #1a3a5c, #0d2036);
+      border: 2px dashed #5a90bf;
+      color: #aed8ff;
+      animation: none;
+    }
+    .phase-icon-jump:hover {
+      border-color: #ffcc00;
+      color: #ffcc00;
+      box-shadow: 0 0 14px rgba(255,204,0,0.5);
+    }
 
     /* ============ CENTER: FIELD ============ */
     .field-wrap {
@@ -102,10 +126,69 @@
     }
     @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
     @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
-    .battle-toast-overlay img { width: 48px; height: 68px; border-radius: 4px; border: 1px solid #666; }
+    .battle-toast-overlay img { width: 52px; height: 74px; border-radius: 4px; border: 1px solid #666; }
     .battle-toast-overlay .vs-text { color: #ffcc00; font-weight: bold; font-size: 13px; }
     .battle-toast-overlay .toast-info { text-align: center; color: #fff; font-size: 12px; }
     .battle-toast-overlay .toast-damage { color: #ff3344; font-weight: bold; font-size: 20px; }
+
+    /* Sword clash: attacker slides in from the left, target from the
+       right, colliding at the sword icon in the middle. */
+    .clash-left { animation: clashInLeft 0.5s ease-out; }
+    .clash-right { animation: clashInRight 0.5s ease-out; }
+    @keyframes clashInLeft { from { transform: translateX(-40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes clashInRight { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .clash-sword {
+      font-size: 26px;
+      animation: swordFlash 0.6s ease-out 0.35s both;
+      filter: drop-shadow(0 0 6px #ffcc00);
+    }
+    @keyframes swordFlash {
+      0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
+      50% { transform: scale(1.5) rotate(10deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+
+    /* Gentle entrance for cards on the field so a fresh page load reads
+       like cards settling into place rather than popping in instantly. */
+    .field-row .card, .mat-side .card {
+      animation: cardAppear 0.35s ease-out;
+    }
+    @keyframes cardAppear {
+      from { opacity: 0; transform: scale(0.85) translateY(6px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* Flying card used for draw/discard animations (Pot of Greed, Card
+       Destruction, etc.) — a fixed-position element that gets its actual
+       start/end coordinates from real zone elements via JS. */
+    .flying-card {
+      position: fixed;
+      width: 42px;
+      height: 60px;
+      background: linear-gradient(135deg, #8b0000 0%, #4a0000 100%);
+      border: 2px solid #ffcc00;
+      border-radius: 4px;
+      z-index: 1500;
+      pointer-events: none;
+      transition: left 0.55s ease-in-out, top 0.55s ease-in-out, opacity 0.55s ease-in-out, transform 0.55s ease-in-out;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+    }
+    .flying-card.to-graveyard {
+      background: linear-gradient(135deg, #333, #111);
+      border-color: #888;
+    }
+
+    .flying-card-label {
+      position: fixed;
+      z-index: 1501;
+      color: #ffcc00;
+      font-size: 11px;
+      font-weight: bold;
+      text-shadow: 1px 1px 2px black;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
 
     .field-mid {
       display: flex;
@@ -158,7 +241,38 @@
       border-radius: 3px;
     }
     .zone-counter img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
+    .zone-counter.gy-clickable { cursor: pointer; }
+    .zone-counter.gy-clickable:hover { outline: 2px solid #66ccff; }
     .zone-label { font-size: 9px; color: #5a90bf; margin-top: 2px; }
+
+    .gy-modal-overlay {
+      display: none;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1002;
+      align-items: center; justify-content: center;
+    }
+    .gy-modal {
+      background: linear-gradient(180deg, #10263e, #05101c);
+      border: 2px solid #5a90bf; border-radius: 12px; padding: 18px;
+      max-width: 600px; max-height: 80vh; overflow-y: auto; text-align: center;
+    }
+    .gy-modal h3 { color: #7fdfff; margin: 0 0 12px 0; }
+    .gy-modal-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+      max-width: 560px;
+    }
+    .gy-modal-card { width: 80px; text-align: center; }
+    .gy-modal-card img { width: 100%; border-radius: 4px; }
+    .gy-modal-card .gname { font-size: 9px; color: #cde; margin-top: 2px; }
+    .gy-modal-close {
+      margin-top: 14px; background: #555; color: #fff; border: none;
+      padding: 8px 18px; border-radius: 6px; cursor: pointer; font-weight: bold;
+    }
+
+    .restart-btn {
+      display: inline-block; margin-top: 12px; background: linear-gradient(180deg, #00e5ff, #0088aa);
+      color: #04141c; border: 1px solid #aef2ff; font-weight: bold;
+      padding: 9px 22px; border-radius: 20px; cursor: pointer; font-size: 13px; text-decoration: none;
+    }
 
     .slot {
       border: 2px dashed #2a4a6c;
@@ -325,6 +439,27 @@
       background: #444; color: #fff; border: 1px solid #666; padding: 8px 18px;
       border-radius: 6px; cursor: pointer; font-weight: bold;
     }
+
+    /* AI turn indicator — shown between each of Kaiba's individual actions
+       so his turn reads as a sequence of visible plays, not one silent jump. */
+    .ai-turn-banner {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 998; background: linear-gradient(90deg, #2a1a3a, #1a1030);
+      border: 2px solid #cc88ff; border-radius: 30px; padding: 8px 20px;
+      color: #e8ccff; font-size: 13px; font-weight: bold;
+      box-shadow: 0 0 20px rgba(200,120,255,0.4);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .ai-spinner { display: inline-block; animation: aiSpin 1.2s linear infinite; }
+    @keyframes aiSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .ai-dots::after {
+      content: '.'; animation: aiDots 1.2s steps(1) infinite;
+    }
+    @keyframes aiDots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
+    .ai-continue-btn {
+      background: #cc88ff; color: #1a0530; border: none; padding: 4px 12px;
+      border-radius: 14px; cursor: pointer; font-weight: bold; font-size: 11px;
+    }
   </style>
 </head>
 <body>
@@ -338,10 +473,14 @@
     const canAct = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
     const canActMain = canAct && inMainPhase;
     const p2MonsterCount = player2.zone.monster.filter(m => m).length;
+    const aiTurnPaused = !isPlayer1Turn && !isMyResponse && !(typeof gameOver !== 'undefined' && gameOver);
 
     const gyMonsters = [...player1.zone.graveyard, ...player2.zone.graveyard]
       .filter(gc => game.isMonster(gc))
       .map(gc => ({ id: gc.instanceId, label: gc.card.name + " (" + gc.owner.name + "'s GY)" }));
+
+    const fusionOptions = game.getAvailableFusions(player1)
+      .map(gc => ({ id: gc.instanceId, label: gc.card.name + " (ATK " + gc.card.atk + ")" }));
 
     function previewAttrs(gc, viewerIsOwner) {
       const visible = gc.faceUp || viewerIsOwner;
@@ -367,11 +506,14 @@
   %>
 
   <% if (typeof gameOver !== 'undefined' && gameOver) { %>
-    <div class="game-over-banner">🏆 <%= winner.name %> WINS THE DUEL! 🏆</div>
+    <div class="game-over-banner">
+      🏆 <%= winner.name %> WINS THE DUEL! 🏆
+      <div><a href="/game/start" class="restart-btn">🔄 RESTART DUEL</a></div>
+    </div>
   <% } %>
 
   <% if (isMyResponse) { %>
-    <div class="response-modal-overlay">
+    <div class="response-modal-overlay" id="responseModalOverlay">
       <div class="response-modal">
         <h3>⚠️ <%= pendingAttack.attacker.card.name %> is attacking
           <% if (pendingAttack.target) { %>your <%= pendingAttack.target.card.name %><% } else { %>you directly<% } %>!</h3>
@@ -399,9 +541,19 @@
     </div>
   <% } %>
 
+  <% if (aiTurnPaused) { %>
+    <div class="ai-turn-banner" id="aiTurnBanner">
+      <span class="ai-spinner">⏳</span> <%= player2.name %> is playing<span class="ai-dots">...</span>
+      <form action="/game/continue-ai" method="POST" id="aiContinueForm" style="display:inline;">
+        <button type="submit" class="ai-continue-btn">▶ Continue Now</button>
+      </form>
+    </div>
+  <% } %>
+
   <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && !isMyResponse) { %>
     <div class="battle-toast-overlay" id="battleToast">
-      <img src="<%= lastBattleEvent.attackerImage %>" />
+      <img class="clash-left" src="<%= lastBattleEvent.attackerImage %>" />
+      <div class="clash-sword">⚔️</div>
       <div class="toast-info">
         <div class="vs-text"><%= lastBattleEvent.attackerName %> <%= lastBattleEvent.wasDirect ? 'attacks directly!' : ('attacks ' + lastBattleEvent.targetName + '!') %></div>
         <% if (lastBattleEvent.damage > 0) { %>
@@ -410,20 +562,52 @@
           <div class="toast-damage" style="color:#66ccff;"><%= lastBattleEvent.destroyedNames.join(' & ') %> destroyed</div>
         <% } %>
       </div>
-      <% if (lastBattleEvent.targetImage) { %><img src="<%= lastBattleEvent.targetImage %>" /><% } %>
+      <% if (lastBattleEvent.targetImage) { %><img class="clash-right" src="<%= lastBattleEvent.targetImage %>" /><% } %>
     </div>
   <% } %>
 
   <div class="arena">
 
-    <!-- LEFT: PHASE SIDEBAR -->
+    <!-- LEFT: CARD PREVIEW PANEL -->
+    <div class="preview-panel">
+      <div class="preview-image-wrap">
+        <img id="previewImage" />
+        <div class="preview-placeholder" id="previewPlaceholder">Hover a card to see its details here.</div>
+      </div>
+      <div class="preview-name" id="previewName"></div>
+      <div class="preview-stats" id="previewStats"></div>
+      <div class="preview-desc" id="previewDesc"></div>
+    </div>
+
+    <!-- PHASE SIDEBAR: the current phase passes on click; any LATER
+         phase jumps straight there, skipping whatever's between (the AI
+         side of a turn always still visits every phase in between via
+         the exact same functions — this only changes what the human
+         chooses to click through). DP/SP auto-advance since there's
+         never a decision to make there. -->
     <div class="phase-sidebar">
       <div class="phase-icon <%= phase === 'draw' ? 'active' : '' %>">DP</div>
       <div class="phase-icon <%= phase === 'standby' ? 'active' : '' %>">SP</div>
-      <div class="phase-icon <%= phase === 'm1' ? 'active' : '' %>">M1</div>
-      <div class="phase-icon <%= phase === 'battle' ? 'active' : '' %>">BP</div>
-      <div class="phase-icon <%= phase === 'm2' ? 'active' : '' %>">M2</div>
-      <div class="phase-icon <%= phase === 'end' ? 'active' : '' %>">EP</div>
+      <%
+        const PHASE_ORDER = ['draw', 'standby', 'm1', 'battle', 'm2', 'end'];
+        const curIdx = PHASE_ORDER.indexOf(phase);
+        const turnActive = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
+      %>
+      <% [['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
+        <% const p = pair[0], label = pair[1]; const pIdx = PHASE_ORDER.indexOf(p); %>
+        <% if (turnActive && phase === p) { %>
+          <form action="/game/next-phase" method="POST" style="margin:0;">
+            <button type="submit" class="phase-icon active phase-icon-btn" title="Pass this phase"><%= label %></button>
+          </form>
+        <% } else if (turnActive && pIdx > curIdx) { %>
+          <form action="/game/goto-phase" method="POST" style="margin:0;">
+            <input type="hidden" name="targetPhase" value="<%= p %>">
+            <button type="submit" class="phase-icon phase-icon-btn phase-icon-jump" title="Jump ahead to <%= label %>"><%= label %></button>
+          </form>
+        <% } else { %>
+          <div class="phase-icon <%= phase === p ? 'active' : '' %>"><%= label %></div>
+        <% } %>
+      <% }) %>
     </div>
 
     <!-- CENTER: FIELD -->
@@ -436,13 +620,13 @@
         <span class="floating-damage" id="floatDamageOpp"></span>
       </div>
 
-      <div class="opp-hand-strip">
+      <div class="opp-hand-strip" id="handOpp">
         <% player2.zone.hand.forEach(() => { %><div class="card face-down"></div><% }) %>
       </div>
 
       <div class="field-mid">
         <div class="side-col">
-          <div class="zone-counter" data-name="Deck" data-desc="<%= player2.zone.deck.length %> cards remaining.">
+          <div class="zone-counter" id="deckOpp" data-name="Deck" data-desc="<%= player2.zone.deck.length %> cards remaining.">
             🂠<div class="count"><%= player2.zone.deck.length %></div>
           </div>
           <div class="zone-label">DECK</div>
@@ -482,30 +666,23 @@
         </div>
 
         <div class="side-col">
-          <div class="zone-counter" data-name="Graveyard" data-desc="<%= player2.zone.graveyard.length %> cards.">
+          <div class="zone-counter gy-clickable" id="gyOpp" data-name="Graveyard" data-desc="<%= player2.zone.graveyard.length %> cards. Click to view."
+               data-gy-cards='<%= JSON.stringify(player2.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.image, desc: gc.card.desc || '', atk: gc.card.atk !== undefined ? gc.card.atk : '', def: gc.card.def !== undefined ? gc.card.def : '' }))) %>'>
             <% if(player2.zone.graveyard.length > 0) { %><img src="<%= player2.zone.graveyard[player2.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
             <div class="count"><%= player2.zone.graveyard.length %></div>
           </div>
-          <div class="zone-label">GY</div>
+          <div class="zone-label">GY (<%= player2.name %>)</div>
         </div>
-      </div>
-
-      <!-- PHASE ACTION ROW -->
-      <div class="action-row">
-        <form action="/game/next-phase" method="POST">
-          <% if (!isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver)) { %>
-            <button type="submit" class="go-btn"><%= waitingForAction ? "PASS ➔" : "NEXT PHASE ➔" %></button>
-          <% } %>
-        </form>
       </div>
 
       <div class="field-mid">
         <div class="side-col">
-          <div class="zone-counter" data-name="Graveyard" data-desc="<%= player1.zone.graveyard.length %> cards.">
+          <div class="zone-counter gy-clickable" id="gyMe" data-name="Graveyard" data-desc="<%= player1.zone.graveyard.length %> cards. Click to view."
+               data-gy-cards='<%= JSON.stringify(player1.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.image, desc: gc.card.desc || '', atk: gc.card.atk !== undefined ? gc.card.atk : '', def: gc.card.def !== undefined ? gc.card.def : '' }))) %>'>
             <% if(player1.zone.graveyard.length > 0) { %><img src="<%= player1.zone.graveyard[player1.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
             <div class="count"><%= player1.zone.graveyard.length %></div>
           </div>
-          <div class="zone-label">GY</div>
+          <div class="zone-label">GY (<%= player1.name %>)</div>
         </div>
 
         <div class="field-center">
@@ -570,7 +747,7 @@
         </div>
 
         <div class="side-col">
-          <div class="zone-counter" data-name="Deck" data-desc="<%= player1.zone.deck.length %> cards remaining.">🂠<div class="count"><%= player1.zone.deck.length %></div></div>
+          <div class="zone-counter" id="deckMe" data-name="Deck" data-desc="<%= player1.zone.deck.length %> cards remaining.">🂠<div class="count"><%= player1.zone.deck.length %></div></div>
           <div class="zone-label">DECK</div>
           <div class="zone-counter" data-name="Extra Deck" data-desc="<%= player1.zone.extraDeck.length %> cards.">EX<div class="count"><%= player1.zone.extraDeck.length %></div></div>
         </div>
@@ -583,7 +760,7 @@
       <% } %>
 
       <!-- PLAYER HAND -->
-      <div class="hand-strip">
+      <div class="hand-strip" id="handMe">
         <% player1.zone.hand.forEach(gameCard => { %>
           <%
             const isMonsterCard = game.isMonster(gameCard);
@@ -647,26 +824,23 @@
       </div>
     </div>
 
-    <!-- RIGHT: CARD PREVIEW PANEL -->
-    <div class="preview-panel">
-      <div class="preview-image-wrap">
-        <img id="previewImage" />
-        <div class="preview-placeholder" id="previewPlaceholder">Hover a card to see its details here.</div>
-      </div>
-      <div class="preview-name" id="previewName"></div>
-      <div class="preview-stats" id="previewStats"></div>
-      <div class="preview-desc" id="previewDesc"></div>
-    </div>
+  </div>
 
+  <!-- GRAVEYARD VIEWER -->
+  <div class="gy-modal-overlay" id="gyModalOverlay">
+    <div class="gy-modal">
+      <h3 id="gyModalTitle">Graveyard</h3>
+      <div class="gy-modal-grid" id="gyModalGrid"></div>
+      <button class="gy-modal-close" id="gyModalClose">Close</button>
+    </div>
   </div>
 
   <!-- TARGETING PANEL (used by Spells/Traps that need a target, and attack selection) -->
   <div id="targetPanel">
     <span id="targetPanelText"></span>
-    <select id="targetPanelSelect" style="display:none;">
-      <% gyMonsters.forEach(m => { %>
-        <option value="<%= m.id %>"><%= m.label %></option>
-      <% }) %>
+    <select id="targetPanelSelect" style="display:none;"
+            data-gy-options='<%= JSON.stringify(gyMonsters) %>'
+            data-fusion-options='<%= JSON.stringify(fusionOptions) %>'>
     </select>
     <button id="targetPanelConfirm" style="display:none;">Confirm</button>
     <button id="targetPanelCancel">Cancel</button>
@@ -678,6 +852,14 @@
 
       const dl = document.getElementById("duelLog");
       if (dl) dl.scrollTop = dl.scrollHeight;
+
+      // Auto-advance the AI's turn one visible action at a time, giving
+      // the human a moment to actually see what just happened before the
+      // next one plays out. "Continue Now" skips the wait.
+      const aiContinueForm = document.getElementById("aiContinueForm");
+      if (aiContinueForm) {
+        setTimeout(() => aiContinueForm.submit(), 1400);
+      }
 
       // Floating "-damage" number over whichever LP bar just got hit
       <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && lastBattleEvent.damage > 0 && lastBattleEvent.damagedPlayerIsPlayer1 !== null) { %>
@@ -693,6 +875,114 @@
 
       const toast = document.getElementById("battleToast");
       if (toast) setTimeout(() => { toast.style.display = "none"; }, 3200);
+
+      // ---------------------------------------------------
+      // DRAW / DISCARD ANIMATIONS (Pot of Greed, Card Destruction, etc.)
+      // Spawns real flying-card elements between the actual on-screen
+      // zone positions, one card at a time.
+      // ---------------------------------------------------
+      function spawnFlyingCard(fromRect, toRect, delay, isDiscard, label) {
+        setTimeout(() => {
+          const card = document.createElement("div");
+          card.className = "flying-card" + (isDiscard ? " to-graveyard" : "");
+          card.style.left = fromRect.left + "px";
+          card.style.top = fromRect.top + "px";
+          document.body.appendChild(card);
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              card.style.left = (toRect.left + toRect.width / 2 - 21) + "px";
+              card.style.top = (toRect.top + toRect.height / 2 - 30) + "px";
+              card.style.transform = "rotate(" + (isDiscard ? "15deg" : "0deg") + ")";
+              card.style.opacity = "0.15";
+            });
+          });
+
+          setTimeout(() => card.remove(), 650);
+        }, delay);
+      }
+
+      function animateCardBatch(fromEl, toEl, count, isDiscard, startDelay) {
+        if (!fromEl || !toEl || count <= 0) return 0;
+        const fromRect = fromEl.getBoundingClientRect();
+        const toRect = toEl.getBoundingClientRect();
+        const STAGGER = 260;
+        for (let i = 0; i < count; i++) {
+          spawnFlyingCard(fromRect, toRect, startDelay + i * STAGGER, isDiscard, "");
+        }
+        return startDelay + count * STAGGER;
+      }
+
+      (function runDrawDiscardAnimations() {
+        const discardEvents = <%- JSON.stringify(typeof lastDiscardEvent !== 'undefined' ? lastDiscardEvent : null) %>;
+        const drawEvents = <%- JSON.stringify(typeof lastDrawEvent !== 'undefined' ? lastDrawEvent : null) %>;
+
+        let t = 0;
+
+        if (discardEvents) {
+          discardEvents.forEach(ev => {
+            const handEl = document.getElementById(ev.playerIsPlayer1 ? "handMe" : "handOpp");
+            const gyEl = document.getElementById(ev.playerIsPlayer1 ? "gyMe" : "gyOpp");
+            t = Math.max(t, animateCardBatch(handEl, gyEl, ev.count, true, t));
+          });
+          t += 200;
+        }
+
+        if (drawEvents) {
+          drawEvents.forEach(ev => {
+            const deckEl = document.getElementById(ev.playerIsPlayer1 ? "deckMe" : "deckOpp");
+            const handEl = document.getElementById(ev.playerIsPlayer1 ? "handMe" : "handOpp");
+            animateCardBatch(deckEl, handEl, ev.count, false, t);
+          });
+        }
+      })();
+
+      // ---------------------------------------------------
+      // GRAVEYARD VIEWER
+      // ---------------------------------------------------
+      function openGyModal(zoneEl, label) {
+        let cards = [];
+        try { cards = JSON.parse(zoneEl.getAttribute("data-gy-cards") || "[]"); } catch (e) { cards = []; }
+        document.getElementById("gyModalTitle").textContent = label + "'s Graveyard (" + cards.length + ")";
+        const grid = document.getElementById("gyModalGrid");
+        grid.innerHTML = "";
+        if (cards.length === 0) {
+          grid.innerHTML = "<p style='color:#789; grid-column: 1 / -1;'>Empty.</p>";
+        } else {
+          cards.forEach(c => {
+            const wrap = document.createElement("div");
+            wrap.className = "gy-modal-card";
+            wrap.setAttribute("data-name", c.name);
+            wrap.setAttribute("data-desc", c.desc || "");
+            wrap.setAttribute("data-atk", c.atk !== undefined ? c.atk : "");
+            wrap.setAttribute("data-def", c.def !== undefined ? c.def : "");
+            wrap.setAttribute("data-image", c.image || "");
+            const img = document.createElement("img");
+            img.src = c.image;
+            const name = document.createElement("div");
+            name.className = "gname";
+            name.textContent = c.name;
+            wrap.appendChild(img);
+            wrap.appendChild(name);
+            grid.appendChild(wrap);
+            bindCardPreview(wrap);
+          });
+        }
+        document.getElementById("gyModalOverlay").style.display = "flex";
+      }
+
+      const gyOpp = document.getElementById("gyOpp");
+      if (gyOpp) gyOpp.addEventListener("click", (e) => { e.stopPropagation(); openGyModal(gyOpp, "<%= player2.name %>"); });
+
+      const gyMe = document.getElementById("gyMe");
+      if (gyMe) gyMe.addEventListener("click", (e) => { e.stopPropagation(); openGyModal(gyMe, "<%= player1.name %>"); });
+
+      document.getElementById("gyModalClose").addEventListener("click", () => {
+        document.getElementById("gyModalOverlay").style.display = "none";
+      });
+      document.getElementById("gyModalOverlay").addEventListener("click", (e) => {
+        if (e.target.id === "gyModalOverlay") e.currentTarget.style.display = "none";
+      });
 
       function postForm(action, fields) {
         const form = document.createElement("form");
@@ -710,7 +1000,8 @@
       }
 
       // ---------------------------------------------------
-      // CARD PREVIEW PANEL (hover any card with data-name)
+      // CARD PREVIEW PANEL (hover any card with data-name — including
+      // ones created dynamically later, like the Graveyard viewer's cards)
       // ---------------------------------------------------
       const previewImage = document.getElementById("previewImage");
       const previewPlaceholder = document.getElementById("previewPlaceholder");
@@ -718,27 +1009,31 @@
       const previewStats = document.getElementById("previewStats");
       const previewDesc = document.getElementById("previewDesc");
 
-      document.querySelectorAll("[data-name]").forEach(el => {
-        el.addEventListener("mouseenter", () => {
-          const name = el.getAttribute("data-name");
-          if (!name) return;
-          previewName.textContent = name;
-          previewDesc.textContent = el.getAttribute("data-desc") || "";
-          const atk = el.getAttribute("data-atk");
-          const def = el.getAttribute("data-def");
-          previewStats.textContent = (atk || def) ? ("ATK/" + (atk || "?") + "  DEF/" + (def || "?")) : "";
-          const img = el.getAttribute("data-image");
-          if (img) {
-            previewImage.src = img;
-            previewImage.style.display = "block";
-            previewPlaceholder.style.display = "none";
-          } else {
-            previewImage.style.display = "none";
-            previewPlaceholder.style.display = "block";
-            previewPlaceholder.textContent = "(No image — face-down card)";
-          }
-        });
-      });
+      function showCardPreview(el) {
+        const name = el.getAttribute("data-name");
+        if (!name) return;
+        previewName.textContent = name;
+        previewDesc.textContent = el.getAttribute("data-desc") || "";
+        const atk = el.getAttribute("data-atk");
+        const def = el.getAttribute("data-def");
+        previewStats.textContent = (atk || def) ? ("ATK/" + (atk || "?") + "  DEF/" + (def || "?")) : "";
+        const img = el.getAttribute("data-image");
+        if (img) {
+          previewImage.src = img;
+          previewImage.style.display = "block";
+          previewPlaceholder.style.display = "none";
+        } else {
+          previewImage.style.display = "none";
+          previewPlaceholder.style.display = "block";
+          previewPlaceholder.textContent = "(No image — face-down card)";
+        }
+      }
+
+      function bindCardPreview(el) {
+        el.addEventListener("mouseenter", () => showCardPreview(el));
+      }
+
+      document.querySelectorAll("[data-name]").forEach(bindCardPreview);
 
       // ---------------------------------------------------
       // TARGETING FLOW (shared by Spells/Traps that need a target)
@@ -766,6 +1061,20 @@
         if (daz) daz.classList.remove("target-eligible-zone");
       }
 
+      function populateSelect(attrName) {
+        const select = document.getElementById("targetPanelSelect");
+        let options = [];
+        try { options = JSON.parse(select.getAttribute(attrName) || "[]"); } catch (e) { options = []; }
+        select.innerHTML = "";
+        options.forEach(opt => {
+          const o = document.createElement("option");
+          o.value = opt.id;
+          o.textContent = opt.label;
+          select.appendChild(o);
+        });
+        return options.length;
+      }
+
       function openTargetPanel(mode) {
         const panel = document.getElementById("targetPanel");
         const text = document.getElementById("targetPanelText");
@@ -775,9 +1084,16 @@
         panel.style.display = "flex";
 
         if (mode === "graveyardMonster") {
-          text.textContent = "Choose a monster from a Graveyard:";
-          select.style.display = "inline-block";
-          confirmBtn.style.display = "inline-block";
+          const count = populateSelect("data-gy-options");
+          text.textContent = count > 0 ? "Choose a monster from a Graveyard:" : "No valid monster in any Graveyard.";
+          select.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.disabled = false;
+        } else if (mode === "fusionMonster") {
+          const count = populateSelect("data-fusion-options");
+          text.textContent = count > 0 ? "Choose a Fusion Monster to Summon:" : "You don't have the materials for any Fusion Monster right now.";
+          select.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.style.display = count > 0 ? "inline-block" : "none";
           confirmBtn.disabled = false;
         } else if (mode === "tribute") {
           select.style.display = "none";
@@ -811,6 +1127,10 @@
         clearAttackerSelection();
         pendingActivation = null;
         pendingSummon = null;
+        // Bring the response modal back if we hid it to let the player
+        // click a field target underneath it.
+        const overlay = document.getElementById("responseModalOverlay");
+        if (overlay) overlay.style.display = "flex";
       }
 
       function startActivation(endpoint, instanceId, needsTarget) {
@@ -1028,6 +1348,16 @@
           e.preventDefault();
           const instanceId = card.getAttribute("data-instance-id");
           const needsTarget = card.getAttribute("data-needs-target");
+
+          // If this card needs us to click something on the field (a
+          // monster or a Spell/Trap), the modal overlay sits on top of the
+          // whole board and would block that click — hide it until the
+          // target is picked or the player cancels.
+          if (needsTarget === "monster" || needsTarget === "spellTrap") {
+            const overlay = document.getElementById("responseModalOverlay");
+            if (overlay) overlay.style.display = "none";
+          }
+
           startActivation("/game/activate-set-card", instanceId, needsTarget || null);
         });
       });

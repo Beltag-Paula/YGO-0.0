@@ -21,23 +21,41 @@ function advanceGame(game) {
     while (!game.gameOver && safety < 500) {
         safety++;
 
-        if (game.state.awaitingResponse) {
-            if (game.battleResponse.defender === humanPlayer) return; // human must decide
-            if (!AIController.step(game)) return;
-            continue;
-        }
+        try {
+            if (game.state.awaitingResponse) {
+                if (game.battleResponse.defender === humanPlayer) return; // human must decide
+                const result = AIController.step(game);
+                if (!result.acted) return;
+                if (result.visible) return; // pause here so the human can see this before it continues
+                continue;
+            }
 
-        if (!game.state.waitingForAction) {
-            game.nextPhase();
-            continue;
-        }
+            if (!game.state.waitingForAction) {
+                game.nextPhase();
+                continue;
+            }
 
-        if (game.currentPlayer !== humanPlayer) {
-            if (!AIController.step(game)) return;
-            continue;
-        }
+            if (game.currentPlayer !== humanPlayer) {
+                const result = AIController.step(game);
+                if (!result.acted) return;
+                if (result.visible) return; // pause so the human can watch this action happen
+                continue;
+            }
 
-        return; // human's turn, human's action window — stop and wait
+            return; // human's turn, human's action window — stop and wait
+        } catch (err) {
+            // A bad AI action or an edge case in a card effect should never
+            // take the whole server down. Log it, force the AI to give up
+            // its current window, and keep the duel playable.
+            console.error("advanceGame() caught an error, forcing a PASS to recover:", err);
+            if (game.state.awaitingResponse) {
+                game.dispatch({ type: "PASS_RESPONSE" });
+            } else if (game.state.waitingForAction) {
+                game.dispatch({ type: "PASS" });
+            } else {
+                return;
+            }
+        }
     }
 }
 
@@ -87,6 +105,8 @@ router.get("/", (req, res) => {
         humanPlayer: humanPlayer,
         log: activeGameInstance.log,
         lastBattleEvent: activeGameInstance.lastBattleEvent,
+        lastDrawEvent: activeGameInstance.lastDrawEvent,
+        lastDiscardEvent: activeGameInstance.lastDiscardEvent,
         game: activeGameInstance
     });
 });
@@ -101,6 +121,68 @@ router.post("/next-phase", (req, res) => {
         } else if (!activeGameInstance.state.waitingForAction) {
             activeGameInstance.nextPhase();
         }
+        advanceGame(activeGameInstance);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 3b. JUMP FORWARD TO A SPECIFIC PHASE (M1/BP/M2/EP buttons)
+// Skips ahead through any intervening phases by repeatedly passing/
+// advancing — the exact same primitives the AI uses for its own turn,
+// just driven directly by the human instead of one step at a time.
+// ---------------------------------------------------------
+const PHASE_ORDER = ["draw", "standby", "m1", "battle", "m2", "end"];
+
+function advanceToPhase(game, targetPhase) {
+    const targetIdx = PHASE_ORDER.indexOf(targetPhase);
+    if (targetIdx === -1) return;
+
+    // CRITICAL: this loop must never cross into the opponent's turn. If
+    // "end" is the target and passing it triggers endTurn() (handing the
+    // turn to Kaiba), this loop must stop immediately — otherwise it keeps
+    // blindly calling dispatch(PASS)/nextPhase() through Kaiba's ENTIRE
+    // turn (summon, battle, everything) without ever letting AIController
+    // actually act, which is exactly what caused Kaiba to never attack.
+    const startingPlayer = game.currentPlayer;
+
+    let safety = 0;
+    while (!game.gameOver && safety < 30) {
+        safety++;
+        if (game.currentPlayer !== startingPlayer) return; // turn changed hands — stop, let advanceGame() drive the AI properly
+
+        const curIdx = PHASE_ORDER.indexOf(game.phase);
+
+        if (curIdx > targetIdx) return; // can't jump backward
+        if (curIdx === targetIdx && game.state.waitingForAction) return; // arrived, and it's an open window
+
+        if (game.state.awaitingResponse) return; // a response window always takes priority
+
+        if (game.state.waitingForAction) {
+            // Still short of the target phase — give up the rest of this
+            // window and move on.
+            game.dispatch({ type: "PASS" });
+        } else {
+            game.nextPhase();
+        }
+    }
+}
+
+router.post("/goto-phase", (req, res) => {
+    const { targetPhase } = req.body;
+    if (activeGameInstance && activeGameInstance.currentPlayer === humanPlayer) {
+        advanceToPhase(activeGameInstance, targetPhase);
+        advanceGame(activeGameInstance);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 3c. LET THE AI TAKE ITS NEXT ACTION (one visible step at a time, so the
+// human can watch Kaiba's turn unfold instead of it resolving all at once)
+// ---------------------------------------------------------
+router.post("/continue-ai", (req, res) => {
+    if (activeGameInstance) {
         advanceGame(activeGameInstance);
     }
     res.redirect("/game");

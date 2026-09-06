@@ -28,6 +28,8 @@ class MainGame {
         this.preventBattleDamageFor = null;     // Waboku: player who takes no battle damage this turn
         this.preventDestructionFor = null;      // Waboku: player whose monsters can't be destroyed by battle this turn
         this.lastBattleEvent = null;            // structured info for the UI: who attacked whom, for how much
+        this.lastDrawEvent = null;              // [{ playerIsPlayer1, count }, ...] — most recent draw(s), for animation
+        this.lastDiscardEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent discard(s), for animation
         this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
 
         this.state = {
@@ -41,6 +43,16 @@ class MainGame {
         this.log.push(msg);
         if (this.log.length > 40) this.log.shift();
         console.log(msg);
+    }
+
+    // entries: [{ playerIsPlayer1, count }, ...] — overwrites so the UI
+    // only ever animates the most recent draw/discard event(s).
+    recordDraw(entries) {
+        this.lastDrawEvent = entries;
+    }
+
+    recordDiscard(entries) {
+        this.lastDiscardEvent = entries;
     }
 
     startDuel() {
@@ -85,7 +97,17 @@ class MainGame {
         if (this.firstTurn && this.turn === 1) {
             this.addLog(`${this.currentPlayer.name} skips their first Draw Phase (going first).`);
         } else {
+            // Rulebook victory condition: a player who cannot draw when
+            // required to loses the Duel immediately.
+            if (this.currentPlayer.zone.deck.length === 0) {
+                this.gameOver = true;
+                this.state.waitingForAction = false;
+                this.winner = this.opponentPlayer;
+                this.addLog(`\n🏆🏆🏆 ${this.currentPlayer.name} cannot draw — ${this.winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+                return;
+            }
             this.currentPlayer.drawCard(1);
+            this.recordDraw([{ playerIsPlayer1: this.currentPlayer === this.player1, count: 1 }]);
             this.addLog(`${this.currentPlayer.name} draws a card.`);
         }
         this.phase = "standby";
@@ -123,6 +145,11 @@ class MainGame {
     dispatch(action) {
         if (this.gameOver) return;
         if (!this.state.waitingForAction) return;
+
+        // Each dispatched action starts fresh — any draw/discard animation
+        // shown should only ever reflect what THIS action just did.
+        this.lastDrawEvent = null;
+        this.lastDiscardEvent = null;
 
         // While a Battle Response Window is open, only the defender may
         // act, and only by activating a Set card or passing.
@@ -254,6 +281,7 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`⭐ ${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
+        this.cleanupOrphanedEquips();
         return true;
     }
 
@@ -289,6 +317,7 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`🂠 ${p.name} sets a monster face-down in Defense Position.`);
+        this.cleanupOrphanedEquips();
         return true;
     }
 
@@ -304,11 +333,18 @@ class MainGame {
     changeBattlePosition(gc) {
         if (!this.canChangePosition(gc)) return false;
 
+        const wasFaceDown = !gc.faceUp;
         gc.position = gc.position === "attack" ? "defense" : "attack";
         gc.faceUp = true;
         gc.state.hasChangedPositionThisTurn = true;
 
         this.addLog(`🔄 ${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
+
+        // Flip Summon: a face-down monster turning face-up triggers its
+        // FLIP effect (if it has one programmed).
+        if (wasFaceDown) Effects.triggerFlip(this, gc);
+
+        this.checkForWinner();
         return true;
     }
 
@@ -476,6 +512,10 @@ class MainGame {
                 } else {
                     this.addLog("No monster destroyed (ATK = DEF).");
                 }
+
+                // Per the rulebook: Flip effects on an attacked face-down
+                // monster resolve AFTER damage calculation completes.
+                if (wasFaceDown) Effects.triggerFlip(this, target);
             }
         }
 
@@ -490,7 +530,24 @@ class MainGame {
         this.checkForWinner();
     }
 
+    // Real rule: "If the equipped monster is destroyed, flipped face-down,
+    // or removed from the field, its Equip Cards are destroyed." Runs
+    // whenever the field could have changed (battle, effects, tributes).
+    cleanupOrphanedEquips() {
+        [this.player1, this.player2].forEach(owner => {
+            owner.getSpellTrapsOnField().forEach(gc => {
+                if (!gc.equippedTo) return;
+                const stillThere = this.findMonsterAnywhereOnField(gc.equippedTo);
+                if (!stillThere) {
+                    owner.moveCard(gc, "spellTrap", "graveyard");
+                    this.addLog(`💔 ${gc.card.name} is destroyed — the monster it was equipped to left the field.`);
+                }
+            });
+        });
+    }
+
     checkForWinner() {
+        this.cleanupOrphanedEquips();
         if (this.gameOver) return;
 
         if (this.player1.lifePoints <= 0 || this.player2.lifePoints <= 0) {
@@ -542,6 +599,7 @@ class MainGame {
         if (meta.needsTarget === "monster") return this.findMonsterAnywhereOnField(targetInstanceId);
         if (meta.needsTarget === "spellTrap") return this.findSpellTrapAnywhereOnField(targetInstanceId);
         if (meta.needsTarget === "graveyardMonster") return this.findGraveyardMonster(targetInstanceId);
+        if (meta.needsTarget === "fusionMonster") return this.findExtraDeckMonster(targetInstanceId);
         return null;
     }
 
@@ -554,11 +612,25 @@ class MainGame {
         const meta = Effects.getMeta(gc.card.name);
         if (!meta || meta.kind !== "spell") return false;
         if (meta.window === "response") return false; // can't happen for spells in our set, but stay safe
+
+        // Per the rulebook: Normal Spells only in your Main Phase; Quick-Play
+        // Spells ("anytime") can also be cast during your own Battle Phase.
+        if (this.phase === "battle" && meta.window !== "anytime") {
+            this.addLog(`⚠️ ${gc.card.name} can only be activated during a Main Phase.`);
+            return false;
+        }
+        if (this.phase !== "m1" && this.phase !== "m2" && this.phase !== "battle") return false;
+
         if (meta.cost?.lp && p.lifePoints <= meta.cost.lp) {
             this.addLog(`⚠️ Not enough Life Points to activate ${gc.card.name}.`);
             return false;
         }
         if (p.getFreeSpellTrapSlot() === -1) return false;
+
+        if (meta.precheck === "ritual" && !this.canRitualSummon(p, gc)) {
+            this.addLog(`⚠️ Cannot Ritual Summon with ${gc.card.name} right now (need the matching Ritual Monster in hand and enough Tribute Levels).`);
+            return false;
+        }
 
         const target = this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
@@ -573,6 +645,8 @@ class MainGame {
         if (meta.cost?.lp) p.dealDamage(meta.cost.lp);
 
         this.addLog(`📜 ${p.name} activates ${gc.card.name}!`);
+        this.lastDrawEvent = null;
+        this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
 
         if (meta.subtype === "normal" || meta.subtype === "quickplay") {
@@ -580,6 +654,138 @@ class MainGame {
         }
 
         this.checkForWinner();
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // FUSION SUMMONING (Polymerization, and "banish these" style Fusions)
+    // ------------------------------------------------------------------
+    findFusionMaterials(player, materialNames) {
+        const pool = [...player.zone.hand, ...player.getMonstersOnField()];
+        const used = new Set();
+        const chosen = [];
+        for (const reqName of materialNames) {
+            const found = pool.find(gc => !used.has(gc.instanceId) && Effects.normalize(gc.card.name) === Effects.normalize(reqName));
+            if (!found) return null;
+            used.add(found.instanceId);
+            chosen.push(found);
+        }
+        return chosen;
+    }
+
+    getAvailableFusions(player) {
+        return player.zone.extraDeck.filter(gc => {
+            const recipe = Effects.getFusionRecipe(gc.card.name);
+            return !!recipe && !!this.findFusionMaterials(player, recipe.materials);
+        });
+    }
+
+    findExtraDeckMonster(instanceId) {
+        if (!instanceId) return null;
+        return (
+            this.player1.zone.extraDeck.find(m => m.instanceId === instanceId) ||
+            this.player2.zone.extraDeck.find(m => m.instanceId === instanceId) ||
+            null
+        );
+    }
+
+    fusionSummon(player, extraDeckInstanceId) {
+        const extraCard = this.findExtraDeckMonster(extraDeckInstanceId);
+        if (!extraCard) return false;
+
+        const recipe = Effects.getFusionRecipe(extraCard.card.name);
+        if (!recipe) return false;
+
+        const materials = this.findFusionMaterials(player, recipe.materials);
+        if (!materials) {
+            this.addLog(`⚠️ Missing Fusion Material for ${extraCard.card.name}.`);
+            return false;
+        }
+        if (player.getFreeMonsterSlot() === -1) {
+            this.addLog("⚠️ No free Monster Zone — Fusion Summon fizzles.");
+            return false;
+        }
+
+        const destZone = recipe.method === "banish" ? "banished" : "graveyard";
+        materials.forEach(m => player.moveCard(m, m.location, destZone));
+
+        player.moveCard(extraCard, "extraDeck", "monster");
+        extraCard.faceUp = true;
+        extraCard.position = "attack";
+        extraCard.state.hasBeenSummonedThisTurn = true;
+
+        const verb = recipe.method === "banish" ? "banishing" : "sending to the GY";
+        this.addLog(`✨ ${player.name} Special Summons ${extraCard.card.name} by ${verb} ${materials.map(m => m.card.name).join(" + ")}!`);
+        this.cleanupOrphanedEquips();
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // RITUAL SUMMONING (Black Luster Ritual / Black Magic Ritual)
+    // ------------------------------------------------------------------
+    canRitualSummon(player, ritualSpellGC) {
+        const recipe = Effects.getRitualRecipe(ritualSpellGC.card.name);
+        if (!recipe) return false;
+
+        const ritualMonster = player.zone.hand.find(
+            gc => Effects.normalize(gc.card.name) === Effects.normalize(recipe.summons)
+        );
+        if (!ritualMonster) return false;
+        if (player.getFreeMonsterSlot() === -1) return false;
+
+        const pool = [
+            ...player.zone.hand.filter(gc => gc.instanceId !== ritualMonster.instanceId && this.isMonster(gc)),
+            ...player.getMonstersOnField()
+        ];
+        const totalAvailable = pool.reduce((sum, gc) => sum + (gc.card.level || 0), 0);
+        return totalAvailable >= recipe.tributeLevel;
+    }
+
+    ritualSummon(player, ritualSpellGC) {
+        const recipe = Effects.getRitualRecipe(ritualSpellGC.card.name);
+        if (!recipe) return false;
+
+        const ritualMonster = player.zone.hand.find(
+            gc => Effects.normalize(gc.card.name) === Effects.normalize(recipe.summons)
+        );
+        if (!ritualMonster) {
+            this.addLog(`⚠️ You don't have ${recipe.summons} in hand to Ritual Summon.`);
+            return false;
+        }
+        if (player.getFreeMonsterSlot() === -1) {
+            this.addLog("⚠️ No free Monster Zone — Ritual Summon fizzles.");
+            return false;
+        }
+
+        // Greedily tribute the fewest, highest-Level monsters (from hand or
+        // field) needed to reach the required total Level.
+        const pool = [
+            ...player.zone.hand.filter(gc => gc.instanceId !== ritualMonster.instanceId && this.isMonster(gc)),
+            ...player.getMonstersOnField()
+        ].sort((a, b) => (b.card.level || 0) - (a.card.level || 0));
+
+        const tributes = [];
+        let totalLevel = 0;
+        for (const gc of pool) {
+            if (totalLevel >= recipe.tributeLevel) break;
+            tributes.push(gc);
+            totalLevel += (gc.card.level || 0);
+        }
+
+        if (totalLevel < recipe.tributeLevel) {
+            this.addLog(`⚠️ Not enough monsters to Tribute for ${ritualSpellGC.card.name} (need total Level ${recipe.tributeLevel}).`);
+            return false;
+        }
+
+        tributes.forEach(gc => player.moveCard(gc, gc.location, "graveyard"));
+
+        player.moveCard(ritualMonster, "hand", "monster");
+        ritualMonster.faceUp = true;
+        ritualMonster.position = "attack";
+        ritualMonster.state.hasBeenSummonedThisTurn = true;
+
+        this.addLog(`🔮 ${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
+        this.cleanupOrphanedEquips();
         return true;
     }
 
@@ -644,6 +850,8 @@ class MainGame {
         if (meta.cost?.lp) owner.dealDamage(meta.cost.lp);
 
         this.addLog(`📜 ${owner.name} activates the set card ${gc.card.name}!`);
+        this.lastDrawEvent = null;
+        this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
 
         if (meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") {
@@ -662,7 +870,19 @@ class MainGame {
     // TURN STRUCTURE
     // ------------------------------------------------------------------
     endPhase() {
+        this.enforceHandSizeLimit(this.currentPlayer);
         this.endTurn();
+    }
+
+    // Rulebook rule: if you have more than 6 cards in hand at the End
+    // Phase, discard down to 6. (Simplified: auto-discards the newest
+    // cards first — the real rule lets the player choose which to keep.)
+    enforceHandSizeLimit(player) {
+        while (player.zone.hand.length > 6) {
+            const card = player.zone.hand[player.zone.hand.length - 1];
+            player.moveCard(card, "hand", "graveyard");
+            this.addLog(`🗑️ ${player.name} discards ${card.card.name} (hand size limit of 6).`);
+        }
     }
 
     endTurn() {

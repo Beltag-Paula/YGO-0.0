@@ -48,7 +48,32 @@ const SPELL_TRAP_META = {
     "shadow spell": { kind: "trap", subtype: "continuous", window: "anytime", needsTarget: "monster" },
     "call of the haunted": { kind: "trap", subtype: "continuous", window: "anytime", needsTarget: "graveyardMonster" },
     "reinforcements": { kind: "trap", subtype: "normal", window: "anytime", needsTarget: "monster" },
-    "waboku": { kind: "trap", subtype: "normal", window: "response" }
+    "waboku": { kind: "trap", subtype: "normal", window: "response" },
+
+    "polymerization": { kind: "spell", subtype: "normal", window: "main", needsTarget: "fusionMonster" },
+    "de-fusion": { kind: "spell", subtype: "quickplay", window: "anytime", needsTarget: "monster" },
+    "black luster ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" },
+    "black magic ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" }
+};
+
+// Fusion Monster recipes actually present in the sample decks.
+// method: 'polymerization' -> materials sent to GY when Polymerization resolves
+//         'banish'         -> Special Summoned by banishing the materials directly (no Polymerization)
+const FUSION_RECIPES = {
+    "gaia the dragon champion": { materials: ["Gaia The Fierce Knight", "Curse of Dragon"], method: "polymerization" },
+    "dark paladin": { materials: ["Dark Magician", "Buster Blader"], method: "polymerization" },
+    "blue-eyes ultimate dragon": { materials: ["Blue-Eyes White Dragon", "Blue-Eyes White Dragon", "Blue-Eyes White Dragon"], method: "polymerization" },
+    "rabid horseman": { materials: ["Battle Ox", "Mystic Horseman"], method: "polymerization" },
+    "xyz-dragon cannon": { materials: ["X-Head Cannon", "Y-Dragon Head", "Z-Metal Tank"], method: "banish" },
+    "xy-dragon cannon": { materials: ["X-Head Cannon", "Y-Dragon Head"], method: "banish" },
+    "xz-tank cannon": { materials: ["X-Head Cannon", "Z-Metal Tank"], method: "banish" },
+    "yz-tank dragon": { materials: ["Y-Dragon Head", "Z-Metal Tank"], method: "banish" }
+};
+
+// Ritual Monster recipes actually present in the sample decks.
+const RITUAL_RECIPES = {
+    "black luster ritual": { summons: "Black Luster Soldier", tributeLevel: 8 },
+    "black magic ritual": { summons: "Magician of Black Chaos", tributeLevel: 8 }
 };
 
 // Give a monster a temporary ATK/DEF delta that automatically reverts at
@@ -129,8 +154,30 @@ const HANDLERS = {
         game.addLog(`⚰️ ${controller.name} pays 800 LP to Special Summon ${target.card.name} with Premature Burial!`);
     },
 
-    "de-fusion": (game) => {
-        game.addLog("De-Fusion has no valid Fusion Monster to target and fizzles.");
+    "de-fusion": (game, gc, target) => {
+        if (!target) return;
+        if (!target.card.type.includes("Fusion")) {
+            game.addLog("⚠️ De-Fusion can only target a Fusion Monster.");
+            return;
+        }
+        const owner = target.owner;
+        const name = target.card.name;
+        owner.moveCard(target, "monster", "extraDeck");
+        game.addLog(`🔄 De-Fusion returns ${name} to the Extra Deck!`);
+    },
+
+    "polymerization": (game, gc, target) => {
+        if (!target) return;
+        const ok = game.fusionSummon(gc.owner, target.instanceId);
+        if (!ok) game.addLog("⚠️ Polymerization fizzles — the Fusion Summon failed.");
+    },
+
+    "black luster ritual": (game, gc) => {
+        game.ritualSummon(gc.owner, gc);
+    },
+
+    "black magic ritual": (game, gc) => {
+        game.ritualSummon(gc.owner, gc);
     },
 
     "burst stream of destruction": (game, gc) => {
@@ -142,6 +189,7 @@ const HANDLERS = {
 
     "pot of greed": (game, gc) => {
         gc.owner.drawCard(2);
+        game.recordDraw([{ playerIsPlayer1: gc.owner === game.player1, count: 2 }]);
         game.addLog(`📗 ${gc.owner.name} draws 2 cards with Pot of Greed!`);
     },
 
@@ -190,27 +238,38 @@ const HANDLERS = {
     "graceful charity": (game, gc) => {
         const p = gc.owner;
         p.drawCard(3);
+        game.recordDraw([{ playerIsPlayer1: p === game.player1, count: 3 }]);
         const discarded = [];
         for (let i = 0; i < 2 && p.zone.hand.length > 0; i++) {
             const card = p.zone.hand[p.zone.hand.length - 1];
             discarded.push(card.card.name);
             p.moveCard(card, "hand", "graveyard");
         }
+        game.recordDiscard([{ playerIsPlayer1: p === game.player1, count: discarded.length }]);
         game.addLog(`📗 ${p.name} draws 3 with Graceful Charity, then discards ${discarded.join(", ") || "nothing"}.`);
     },
 
     "card destruction": (game) => {
+        const discardEntries = [];
+        const drawEntries = [];
         [game.player1, game.player2].forEach(p => {
             const count = p.zone.hand.length;
             [...p.zone.hand].forEach(card => p.moveCard(card, "hand", "graveyard"));
+            discardEntries.push({ playerIsPlayer1: p === game.player1, count });
             p.drawCard(count);
+            drawEntries.push({ playerIsPlayer1: p === game.player1, count });
         });
+        game.recordDiscard(discardEntries);
+        game.recordDraw(drawEntries);
         game.addLog("🔄 Card Destruction — both players discard their hands and draw back up!");
     },
 
-    "heavy storm": (game) => {
-        const p1ST = game.player1.getSpellTrapsOnField();
-        const p2ST = game.player2.getSpellTrapsOnField();
+    "heavy storm": (game, gc) => {
+        // Exclude the Heavy Storm card itself — it's already sitting face-up
+        // in the activator's Spell/Trap zone by the time this runs, and the
+        // engine's own cleanup step sends it to the GY afterward.
+        const p1ST = game.player1.getSpellTrapsOnField().filter(c => c.instanceId !== gc.instanceId);
+        const p2ST = game.player2.getSpellTrapsOnField().filter(c => c.instanceId !== gc.instanceId);
         [...p1ST].forEach(c => game.player1.moveCard(c, "spellTrap", "graveyard"));
         [...p2ST].forEach(c => game.player2.moveCard(c, "spellTrap", "graveyard"));
         game.addLog("🌪️ Heavy Storm destroys every Spell/Trap Card on the field!");
@@ -329,6 +388,14 @@ function getMeta(cardName) {
     return SPELL_TRAP_META[normalize(cardName)] || null;
 }
 
+function getFusionRecipe(cardName) {
+    return FUSION_RECIPES[normalize(cardName)] || null;
+}
+
+function getRitualRecipe(cardName) {
+    return RITUAL_RECIPES[normalize(cardName)] || null;
+}
+
 function activate(game, gc, target) {
     const handler = HANDLERS[normalize(gc.card.name)];
     if (!handler) {
@@ -338,4 +405,44 @@ function activate(game, gc, target) {
     handler(game, gc, target);
 }
 
-module.exports = { getMeta, activate, normalize };
+// ------------------------------------------------------------------
+// MONSTER FLIP EFFECTS — triggered when a face-down monster turns
+// face-up, whether by being attacked or by a manual position change.
+// This is the start of real monster-effect support (separate from the
+// Spell/Trap library above); only a handful of cards are covered so far.
+// ------------------------------------------------------------------
+const FLIP_EFFECTS = {
+    "man-eater bug": (game, gc) => {
+        const owner = gc.owner;
+        const opponent = owner === game.player1 ? game.player2 : game.player1;
+        const enemyMonsters = opponent.getMonstersOnField();
+        const ownMonsters = owner.getMonstersOnField().filter(m => m.instanceId !== gc.instanceId);
+
+        // FLIP effect says "target 1 monster on the field" (either side);
+        // heuristically prefer the opponent's strongest monster.
+        const target = enemyMonsters.length > 0
+            ? enemyMonsters.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0]
+            : ownMonsters[0];
+
+        if (!target) {
+            game.addLog(`${gc.card.name}'s FLIP effect has no target and fizzles.`);
+            return;
+        }
+
+        const name = target.card.name;
+        target.owner.moveCard(target, "monster", "graveyard");
+        game.addLog(`🐛 ${gc.card.name} FLIP: destroys ${name}!`);
+    }
+};
+
+function getFlipEffect(cardName) {
+    return FLIP_EFFECTS[normalize(cardName)] || null;
+}
+
+function triggerFlip(game, gc) {
+    const handler = FLIP_EFFECTS[normalize(gc.card.name)];
+    if (!handler) return;
+    handler(game, gc);
+}
+
+module.exports = { getMeta, getFusionRecipe, getRitualRecipe, activate, normalize, getFlipEffect, triggerFlip };

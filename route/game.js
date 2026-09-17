@@ -17,16 +17,56 @@ let humanPlayer = null; // whichever Player object the browser user controls (Yu
 function advanceGame(game) {
     if (!game || !humanPlayer) return;
 
+    // When an AI action ends the AI's turn (e.g. passing its End Phase),
+    // the engine correctly swaps currentPlayer and resets phase to "draw"
+    // — but that new phase hasn't actually been ENTERED yet (waitingForAction
+    // is still false at that instant). Returning immediately there used to
+    // leave the game sitting in that not-yet-entered state forever, which
+    // is exactly what looked like being "stuck in Draw Phase." Instead of
+    // stopping the moment a visible AI action happens, we now note that a
+    // pause was requested and keep processing (via nextPhase()) until the
+    // engine actually settles into a real waiting state — only then do we
+    // stop and hand control back.
+    let pauseRequested = false;
     let safety = 0;
+    let lastSignature = null;
+    let stagnantCount = 0;
+
     while (!game.gameOver && safety < 500) {
         safety++;
+
+        if (pauseRequested && game.state.waitingForAction) return;
+
+        // Stagnation guard: if the exact same (player, phase, hand size,
+        // window state) repeats many times in a row, something the AI
+        // keeps trying to do is silently failing (e.g. a spell whose
+        // activation requirement it can't meet). Rather than spin for
+        // the full 500-iteration budget doing nothing useful, force that
+        // window closed so control returns to a real state.
+        const signature = `${game.currentPlayer.name}|${game.phase}|${game.currentPlayer.zone.hand.length}|${game.state.actedThisWindow}|${game.state.awaitingResponse}`;
+        if (signature === lastSignature) {
+            stagnantCount++;
+            if (stagnantCount > 20) {
+                if (game.state.awaitingResponse) {
+                    game.dispatch({ type: "PASS_RESPONSE" });
+                } else {
+                    game.dispatch({ type: "PASS" });
+                }
+                stagnantCount = 0;
+                lastSignature = null;
+                continue;
+            }
+        } else {
+            stagnantCount = 0;
+            lastSignature = signature;
+        }
 
         try {
             if (game.state.awaitingResponse) {
                 if (game.battleResponse.defender === humanPlayer) return; // human must decide
                 const result = AIController.step(game);
                 if (!result.acted) return;
-                if (result.visible) return; // pause here so the human can see this before it continues
+                if (result.visible) pauseRequested = true;
                 continue;
             }
 
@@ -38,7 +78,7 @@ function advanceGame(game) {
             if (game.currentPlayer !== humanPlayer) {
                 const result = AIController.step(game);
                 if (!result.acted) return;
-                if (result.visible) return; // pause so the human can watch this action happen
+                if (result.visible) pauseRequested = true;
                 continue;
             }
 
@@ -89,6 +129,19 @@ router.get("/", (req, res) => {
         return res.redirect("/game/start");
     }
 
+    // Consume these one-shot event fields: render them THIS time, then
+    // clear them so a later page view (e.g. a click that doesn't involve
+    // battle) doesn't replay the same attack toast or draw animation
+    // again. Without this, the last battle/draw/discard just kept
+    // showing up on every subsequent render until the next real one
+    // overwrote it — which is exactly what looked like duplicate attacks.
+    const battleEvent = activeGameInstance.lastBattleEvent;
+    const drawEvent = activeGameInstance.lastDrawEvent;
+    const discardEvent = activeGameInstance.lastDiscardEvent;
+    activeGameInstance.lastBattleEvent = null;
+    activeGameInstance.lastDrawEvent = null;
+    activeGameInstance.lastDiscardEvent = null;
+
     res.render("game", {
         player1: activeGameInstance.player1,
         player2: activeGameInstance.player2,
@@ -104,9 +157,9 @@ router.get("/", (req, res) => {
         winner: activeGameInstance.winner,
         humanPlayer: humanPlayer,
         log: activeGameInstance.log,
-        lastBattleEvent: activeGameInstance.lastBattleEvent,
-        lastDrawEvent: activeGameInstance.lastDrawEvent,
-        lastDiscardEvent: activeGameInstance.lastDiscardEvent,
+        lastBattleEvent: battleEvent,
+        lastDrawEvent: drawEvent,
+        lastDiscardEvent: discardEvent,
         game: activeGameInstance
     });
 });
@@ -356,6 +409,83 @@ router.post("/pass-response", (req, res) => {
         advanceGame(activeGameInstance);
     }
     res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 12. ACTIVATE A MONSTER'S IGNITION EFFECT (own Main Phase)
+// e.g. Breaker's Spell Counter removal, Obelisk's Tribute-2 wipe.
+// ---------------------------------------------------------
+router.post("/activate-monster-effect", (req, res) => {
+    const { instanceId, targetInstanceId } = req.body;
+
+    if (activeGameInstance) {
+        const targetCard = activeGameInstance.currentPlayer.zone.monster.find(
+            gc => gc && gc.instanceId === instanceId
+        );
+
+        if (targetCard) {
+            activeGameInstance.dispatch({
+                type: "ACTIVATE_MONSTER_EFFECT",
+                payload: { card: targetCard, targetInstanceId: targetInstanceId || null }
+            });
+        }
+        advanceGame(activeGameInstance);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 13. ACTIVATE A HAND-RESPONSE CARD DURING A BATTLE RESPONSE WINDOW
+// (Kuriboh: discard from hand to negate battle damage from this attack)
+// ---------------------------------------------------------
+router.post("/activate-hand-card", (req, res) => {
+    const { instanceId } = req.body;
+
+    if (activeGameInstance && humanPlayer) {
+        const targetCard = humanPlayer.zone.hand.find(gc => gc.instanceId === instanceId);
+
+        if (targetCard) {
+            activeGameInstance.dispatch({
+                type: "ACTIVATE_HAND_CARD",
+                payload: { card: targetCard }
+            });
+        }
+        advanceGame(activeGameInstance);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 14. SURRENDER — human concedes immediately, from any point in the duel.
+// ---------------------------------------------------------
+router.post("/surrender", (req, res) => {
+    if (activeGameInstance && humanPlayer && !activeGameInstance.gameOver) {
+        activeGameInstance.surrender(humanPlayer);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 15. NEW DUEL — restart with a fresh shuffled duel (alias of /start,
+// named to match the "surrender & start a new duel" flow).
+// ---------------------------------------------------------
+router.post("/new-duel", (req, res) => {
+    try {
+        const yugiDeck = require("../deck_inventory/yugi.json");
+        const kaibaDeck = require("../deck_inventory/kaiba.json");
+
+        const p1 = new Player("Yugi", yugiDeck);
+        const p2 = new Player("Kaiba", kaibaDeck);
+
+        humanPlayer = p1;
+        activeGameInstance = new MainGame(p1, p2);
+        activeGameInstance.startDuel();
+        advanceGame(activeGameInstance);
+
+        res.redirect("/game");
+    } catch (err) {
+        res.status(500).send(`CRITICAL ERROR: Failed to parse inventory JSON configurations or engine failed initialization: ${err.message}`);
+    }
 });
 
 module.exports = router;

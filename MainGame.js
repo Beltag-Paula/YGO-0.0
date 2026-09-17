@@ -31,6 +31,7 @@ class MainGame {
         this.lastDrawEvent = null;              // [{ playerIsPlayer1, count }, ...] — most recent draw(s), for animation
         this.lastDiscardEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent discard(s), for animation
         this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
+        this.knownGYInstanceIds = new Set();    // tracks which GY arrivals have already fired their death-trigger
 
         this.state = {
             waitingForAction: false,
@@ -93,6 +94,7 @@ class MainGame {
     }
 
     drawPhase() {
+        this.addLog(`\n--- DRAW PHASE (${this.currentPlayer.name}) ---`);
         // Standard rule: the player going first does not draw on turn 1.
         if (this.firstTurn && this.turn === 1) {
             this.addLog(`${this.currentPlayer.name} skips their first Draw Phase (going first).`);
@@ -110,11 +112,15 @@ class MainGame {
             this.recordDraw([{ playerIsPlayer1: this.currentPlayer === this.player1, count: 1 }]);
             this.addLog(`${this.currentPlayer.name} draws a card.`);
         }
-        this.phase = "standby";
+        this.state.waitingForAction = true;
     }
 
     standbyPhase() {
-        this.phase = "m1";
+        this.addLog(`\n--- STANDBY PHASE (${this.currentPlayer.name}) ---`);
+        // No Standby-triggered effects are implemented yet, so this is
+        // just a beat to pass through — but it's still its own visible
+        // step, not silently skipped.
+        this.state.waitingForAction = true;
     }
 
     mainPhase1() {
@@ -156,6 +162,8 @@ class MainGame {
         if (this.state.awaitingResponse) {
             if (action.type === "ACTIVATE_SET_CARD") {
                 this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, true);
+            } else if (action.type === "ACTIVATE_HAND_CARD") {
+                this.activateHandResponseCard(action.payload.card);
             } else if (action.type === "PASS_RESPONSE") {
                 this.resolveBattleDamage();
             }
@@ -193,22 +201,48 @@ class MainGame {
                 if (this.phase !== "battle") return;
                 this.declareAttack(action.payload.attacker, action.payload.target || null);
                 break;
+            case "ACTIVATE_MONSTER_EFFECT":
+                if (!inMainPhase) return;
+                this.activateMonsterEffect(action.payload.card, action.payload.targetInstanceId || null);
+                break;
             case "PASS":
                 this.endActionWindow();
                 break;
         }
     }
 
+    // ------------------------------------------------------------------
+    // SURRENDER — the human player concedes; the other player is
+    // declared the winner immediately, wherever the duel currently is.
+    // ------------------------------------------------------------------
+    surrender(conceder) {
+        if (this.gameOver || !conceder) return;
+        const winner = conceder === this.player1 ? this.player2 : this.player1;
+        this.gameOver = true;
+        this.winner = winner;
+        this.state.waitingForAction = false;
+        this.state.awaitingResponse = false;
+        this.addLog(`\n🏳️ ${conceder.name} surrenders the Duel!`);
+        this.addLog(`\n🏆🏆🏆 ${winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+    }
+
     endActionWindow() {
         this.state.waitingForAction = false;
 
-        if (this.phase === "m1") {
+        if (this.phase === "draw") {
+            this.phase = "standby";
+        } else if (this.phase === "standby") {
+            this.phase = "m1";
+        } else if (this.phase === "m1") {
             // No battle phase on the very first turn of the whole duel
             this.phase = this.firstTurn ? "end" : "battle";
         } else if (this.phase === "battle") {
             this.phase = "m2";
         } else if (this.phase === "m2") {
             this.phase = "end";
+        } else if (this.phase === "end") {
+            this.enforceHandSizeLimit(this.currentPlayer);
+            this.endTurn(); // sets this.phase back to "draw" for the new current player
         }
     }
 
@@ -232,6 +266,10 @@ class MainGame {
         return Effects.getMeta(cardName);
     }
 
+    getIgnitionMeta(cardName) {
+        return Effects.getIgnition(cardName);
+    }
+
     getRequiredTributes(level) {
         if (level <= 4) return 0;
         if (level <= 6) return 1;
@@ -239,11 +277,46 @@ class MainGame {
         return 3;
     }
 
+    // Cost Down treats monsters in hand as 2 Levels lower (min 1) for the
+    // rest of the turn it was activated.
+    getEffectiveLevel(player, gc) {
+        const base = gc.card.level || 0;
+        if (player.costDownActive) return Math.max(1, base - 2);
+        return base;
+    }
+
+    // How many Tributes THIS summon actually needs, folding in Cost Down
+    // (lower effective Level) and Soul Exchange (pre-paid Tribute credits).
+    getRequiredTributesForSummon(player, gc) {
+        const level = this.getEffectiveLevel(player, gc);
+        const raw = this.getRequiredTributes(level);
+        const credits = Math.min(raw, player.soulExchangeCredits || 0);
+        return { required: raw - credits, creditsUsed: credits };
+    }
+
+    // True while the player controls a face-up Ultimate Offering, which
+    // lets them pay 500 LP for an extra Normal Summon/Set each turn.
+    controlsActiveUltimateOffering(player) {
+        return player.getSpellTrapsOnField().some(
+            c => c.faceUp && Effects.normalize(c.card.name) === "ultimate offering"
+        );
+    }
+
     canNormalSummon(gc) {
         const p = this.currentPlayer;
 
         if (!this.isMonster(gc)) return false;
-        if (p.normalSummonedThisTurn) return false;
+        // Ritual (and Fusion/Synchro/Xyz/Link, though those never live in
+        // the hand anyway) monsters can ONLY be Ritual/Special Summoned —
+        // never Normal or Tribute Summoned, no matter how many monsters
+        // you have to tribute.
+        if (gc.card.type.includes("Ritual")) return false;
+
+        if (p.normalSummonedThisTurn) {
+            // Ultimate Offering allows extra Summons this turn, each
+            // costing 500 LP — otherwise one Normal Summon/Set per turn.
+            if (!this.controlsActiveUltimateOffering(p) || p.lifePoints <= 500) return false;
+        }
 
         const hasCard = p.zone.hand.some(c => c.instanceId === gc.instanceId);
         if (!hasCard) return false;
@@ -255,9 +328,10 @@ class MainGame {
         const p = this.currentPlayer;
 
         if (!this.canNormalSummon(gc)) return false;
-        if (this.state.actedThisWindow) return false;
+        const isBonusSummon = p.normalSummonedThisTurn; // already used the free Summon this turn
+        if (this.state.actedThisWindow && !isBonusSummon) return false;
 
-        const required = this.getRequiredTributes(gc.card.level);
+        const { required, creditsUsed } = this.getRequiredTributesForSummon(p, gc);
         if (tributeIndices.length !== required) return false;
 
         const tributesToProcess = [];
@@ -277,11 +351,18 @@ class MainGame {
         gc.position = "attack";
         gc.state.hasBeenSummonedThisTurn = true;
 
+        if (isBonusSummon) {
+            p.dealDamage(500);
+            this.addLog(`💰 ${p.name} pays 500 LP to use Ultimate Offering for an extra Summon!`);
+        }
+        if (creditsUsed) p.soulExchangeCredits -= creditsUsed;
+
         p.normalSummonedThisTurn = true;
         this.state.actedThisWindow = true;
 
         this.addLog(`⭐ ${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
-        this.cleanupOrphanedEquips();
+        Effects.triggerOnSummon(this, gc);
+        this.checkForWinner();
         return true;
     }
 
@@ -291,9 +372,10 @@ class MainGame {
         const p = this.currentPlayer;
 
         if (!this.canNormalSummon(gc)) return false;
-        if (this.state.actedThisWindow) return false;
+        const isBonusSummon = p.normalSummonedThisTurn;
+        if (this.state.actedThisWindow && !isBonusSummon) return false;
 
-        const required = this.getRequiredTributes(gc.card.level);
+        const { required, creditsUsed } = this.getRequiredTributesForSummon(p, gc);
         if (tributeIndices.length !== required) return false;
 
         const tributesToProcess = [];
@@ -313,12 +395,85 @@ class MainGame {
         gc.position = "defense";
         gc.state.hasBeenSummonedThisTurn = true;
 
+        if (isBonusSummon) {
+            p.dealDamage(500);
+            this.addLog(`💰 ${p.name} pays 500 LP to use Ultimate Offering for an extra Set!`);
+        }
+        if (creditsUsed) p.soulExchangeCredits -= creditsUsed;
+
         p.normalSummonedThisTurn = true;
         this.state.actedThisWindow = true;
 
         this.addLog(`🂠 ${p.name} sets a monster face-down in Defense Position.`);
-        this.cleanupOrphanedEquips();
+        this.checkForWinner();
         return true;
+    }
+
+    // ------------------------------------------------------------------
+    // IGNITION MONSTER EFFECTS (Breaker, Obelisk, Rabid Horseman, ...) —
+    // manually activated by their controller during their own Main Phase.
+    // ------------------------------------------------------------------
+    activateMonsterEffect(gc, targetInstanceId = null) {
+        if (!gc || gc.location !== "monster" || gc.owner !== this.currentPlayer) return false;
+        if (gc.modifiers?.effectsNegated) {
+            this.addLog(`${gc.card.name}'s effect is negated.`);
+            return false;
+        }
+
+        const ign = Effects.getIgnition(gc.card.name);
+        if (!ign) {
+            this.addLog(`${gc.card.name} has no activatable effect.`);
+            return false;
+        }
+        if (!ign.canActivate(this, gc)) {
+            this.addLog(`${gc.card.name}'s effect cannot be activated right now.`);
+            return false;
+        }
+
+        let target = null;
+        if (ign.needsTarget) {
+            target = this.resolveTarget({ needsTarget: ign.needsTarget }, targetInstanceId);
+            if (ign.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, gc.owner)) {
+                this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
+                return false;
+            }
+            if (!target) {
+                this.addLog(`⚠️ ${gc.card.name} has no valid target.`);
+                return false;
+            }
+        }
+
+        const ok = ign.activate(this, gc, target);
+        if (ok) this.checkForWinner();
+        return ok;
+    }
+
+    // Kuriboh-style effects activated straight from hand during a Battle
+    // Response Window instead of from the Spell/Trap Zone.
+    activateHandResponseCard(gc) {
+        if (!gc || !this.battleResponse) return false;
+        const owner = gc.owner;
+        if (owner !== this.battleResponse.defender) return false;
+        const hasCard = owner.zone.hand.some(c => c.instanceId === gc.instanceId);
+        if (!hasCard) return false;
+
+        const effect = Effects.getHandResponseEffect(gc.card.name);
+        if (!effect || effect.window !== "response") return false;
+
+        effect.activate(this, gc);
+        this.resolveBattleDamage();
+        // The protection is scoped to this one attack, not the rest of
+        // the turn — clear it right after this attack resolves.
+        this.preventBattleDamageFor = null;
+        this.checkForWinner();
+        return true;
+    }
+
+    getEligibleHandResponses(player) {
+        return player.zone.hand.filter(gc => {
+            const effect = Effects.getHandResponseEffect(gc.card.name);
+            return effect && effect.window === "response";
+        });
     }
 
     canChangePosition(gc) {
@@ -349,10 +504,20 @@ class MainGame {
     }
 
     getAtk(gc) {
+        const dynamic = Effects.getDynamicStats(this, gc);
+        if (dynamic) {
+            // The printed ATK for these cards is a "-1" placeholder (real
+            // stat is calculated live), so the base value is ignored here.
+            return Math.max(0, dynamic.atk + (gc.card.atk > 0 ? gc.card.atk : 0) + (gc.modifiers?.atk || 0));
+        }
         return Math.max(0, (gc.card.atk || 0) + (gc.modifiers?.atk || 0));
     }
 
     getDef(gc) {
+        const dynamic = Effects.getDynamicStats(this, gc);
+        if (dynamic) {
+            return Math.max(0, dynamic.def + (gc.card.def > 0 ? gc.card.def : 0) + (gc.modifiers?.def || 0));
+        }
         return Math.max(0, (gc.card.def || 0) + (gc.modifiers?.def || 0));
     }
 
@@ -384,6 +549,10 @@ class MainGame {
         const defender = this.opponentPlayer;
         const defenderMonsters = defender.getMonstersOnField();
 
+        if (!target && Effects.cannotAttackDirectly(attacker.card.name)) {
+            this.addLog(`❌ ${attacker.card.name} cannot declare a direct attack.`);
+            return false;
+        }
         if (!target && defenderMonsters.length > 0) {
             this.addLog(`❌ ${attacker.card.name} cannot attack directly while ${defender.name} controls monsters.`);
             return false;
@@ -400,7 +569,8 @@ class MainGame {
         }
 
         const eligible = this.getEligibleResponses(defender);
-        if (eligible.length > 0) {
+        const handEligible = this.getEligibleHandResponses(defender);
+        if (eligible.length > 0 || handEligible.length > 0) {
             this.battleResponse = { defender };
             this.state.awaitingResponse = true;
             this.addLog(`${defender.name} may activate a Set Spell/Trap Card in response.`);
@@ -428,7 +598,8 @@ class MainGame {
             wasDirect: !target,
             damage: 0,
             damagedPlayerIsPlayer1: null,
-            destroyedNames: []
+            destroyedNames: [],
+            targetWasRevealed: false
         };
 
         const dealDamage = (player, amount) => {
@@ -499,11 +670,21 @@ class MainGame {
                 const defVal = this.getDef(target);
                 const wasFaceDown = !target.faceUp;
                 target.faceUp = true;
+                event.targetWasRevealed = wasFaceDown;
+                event.targetImage = target.card.image; // was blank for a face-down card until now
                 if (wasFaceDown) this.addLog(`The set monster is revealed: ${target.card.name} (DEF ${defVal})!`);
 
                 if (atkVal > defVal) {
                     destroy(defender, target);
                     this.addLog(`💥 ${target.card.name} destroyed!`);
+                    if (Effects.hasPiercing(attacker.card.name)) {
+                        const pierce = dealDamage(defender, atkVal - defVal);
+                        if (pierce > 0) {
+                            event.damage = pierce;
+                            event.damagedPlayerIsPlayer1 = defender === this.player1;
+                            this.addLog(`🗡️ ${attacker.card.name}'s piercing damage hits ${defender.name} for ${pierce}!`);
+                        }
+                    }
                 } else if (atkVal < defVal) {
                     const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
                     event.damage = dealt;
@@ -517,6 +698,27 @@ class MainGame {
                 // monster resolve AFTER damage calculation completes.
                 if (wasFaceDown) Effects.triggerFlip(this, target);
             }
+        }
+
+        // Gaia the Dragon Champion: destroying a monster by battle grants
+        // a second attack this turn (once per turn).
+        if (attacker.location === "monster" && event.destroyedNames.length > 0 &&
+            Effects.hasChainAttackOnDestroy(attacker.card.name) && !attacker._usedChainAttackThisTurn) {
+            attacker._usedChainAttackThisTurn = true;
+            attacker.state.hasAttackedThisTurn = false;
+            this.turnEffects.push(() => { attacker._usedChainAttackThisTurn = false; });
+            this.addLog(`⚔️ ${attacker.card.name} may attack again this turn!`);
+        }
+
+        // Spear Dragon-style monsters flip to Defense Position at the End
+        // Phase of any turn they attacked in.
+        if (attacker.location === "monster" && Effects.forcedDefenseAfterAttack(attacker.card.name)) {
+            this.turnEffects.push(() => {
+                if (attacker.location === "monster") {
+                    attacker.position = "defense";
+                    this.addLog(`🔻 ${attacker.card.name} is switched to Defense Position after attacking.`);
+                }
+            });
         }
 
         this.lastBattleEvent = event;
@@ -546,8 +748,25 @@ class MainGame {
         });
     }
 
+    // Scans for monsters that newly arrived in either Graveyard since the
+    // last check, and fires "sent from the field to the GY" effects
+    // (Sangan, Witch of the Black Forest, etc.) for the ones that
+    // genuinely came from the field (not a hand discard).
+    processNewGraveyardArrivals() {
+        [this.player1, this.player2].forEach(p => {
+            p.zone.graveyard.forEach(gc => {
+                if (this.knownGYInstanceIds.has(gc.instanceId)) return;
+                this.knownGYInstanceIds.add(gc.instanceId);
+                if (this.isMonster(gc) && gc._arrivedFromField) {
+                    Effects.triggerGYEffect(this, gc);
+                }
+            });
+        });
+    }
+
     checkForWinner() {
         this.cleanupOrphanedEquips();
+        this.processNewGraveyardArrivals();
         if (this.gameOver) return;
 
         if (this.player1.lifePoints <= 0 || this.player2.lifePoints <= 0) {
@@ -637,6 +856,10 @@ class MainGame {
             this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
             return false;
         }
+        if (meta.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, p)) {
+            this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
+            return false;
+        }
 
         p.moveCard(gc, "hand", "spellTrap");
         gc.faceUp = true;
@@ -716,7 +939,7 @@ class MainGame {
 
         const verb = recipe.method === "banish" ? "banishing" : "sending to the GY";
         this.addLog(`✨ ${player.name} Special Summons ${extraCard.card.name} by ${verb} ${materials.map(m => m.card.name).join(" + ")}!`);
-        this.cleanupOrphanedEquips();
+        this.checkForWinner();
         return true;
     }
 
@@ -785,7 +1008,7 @@ class MainGame {
         ritualMonster.state.hasBeenSummonedThisTurn = true;
 
         this.addLog(`🔮 ${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
-        this.cleanupOrphanedEquips();
+        this.checkForWinner();
         return true;
     }
 
@@ -839,15 +1062,34 @@ class MainGame {
             return false;
         }
 
+        let costTribute = null;
+        if (meta.cost?.tributeMinAtk) {
+            costTribute = owner.getMonstersOnField()
+                .filter(m => this.getAtk(m) >= meta.cost.tributeMinAtk)
+                .sort((a, b) => this.getAtk(b) - this.getAtk(a))[0];
+            if (!costTribute) {
+                this.addLog(`⚠️ ${gc.card.name} requires Tributing a monster with ${meta.cost.tributeMinAtk}+ ATK — none available.`);
+                return false;
+            }
+        }
+
         const target = this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
             this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
+            return false;
+        }
+        if (meta.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, owner)) {
+            this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
             return false;
         }
 
         gc.faceUp = true;
         gc.spellTrap.activated = true;
         if (meta.cost?.lp) owner.dealDamage(meta.cost.lp);
+        if (costTribute) {
+            owner.moveCard(costTribute, "monster", "graveyard");
+            this.addLog(`💀 ${owner.name} Tributes ${costTribute.card.name} to activate ${gc.card.name}.`);
+        }
 
         this.addLog(`📜 ${owner.name} activates the set card ${gc.card.name}!`);
         this.lastDrawEvent = null;
@@ -870,8 +1112,12 @@ class MainGame {
     // TURN STRUCTURE
     // ------------------------------------------------------------------
     endPhase() {
-        this.enforceHandSizeLimit(this.currentPlayer);
-        this.endTurn();
+        this.addLog(`\n--- END PHASE (${this.currentPlayer.name}) ---`);
+        // Stop here and let the human actually see whose turn just ended
+        // before flipping over to the other player. Passing this window
+        // (endActionWindow's "end" branch) is what actually enforces the
+        // hand-size limit and hands the turn over.
+        this.state.waitingForAction = true;
     }
 
     // Rulebook rule: if you have more than 6 cards in hand at the End

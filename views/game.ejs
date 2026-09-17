@@ -5,7 +5,7 @@
   <style>
     * { box-sizing: border-box; }
     body {
-      background: radial-gradient(ellipse at center, #0a1a2a 0%, #04080f 100%);
+      background: radial-gradient(ellipse at center, #14100a 0%, #05040a 70%, #000000 100%);
       color: #dbe9ff;
       font-family: 'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif;
       margin: 0;
@@ -30,10 +30,10 @@
       padding-top: 60px;
     }
     .phase-icon {
-      background: linear-gradient(180deg, #1a3a5c, #0d2036);
-      border: 2px solid #2a5a8c;
+      background: linear-gradient(180deg, #2a2110, #16130a);
+      border: 2px solid #a9862f;
       border-radius: 6px;
-      color: #7fb3e0;
+      color: #c9a856;
       font-weight: bold;
       font-size: 12px;
       text-align: center;
@@ -41,10 +41,18 @@
       letter-spacing: 1px;
     }
     .phase-icon.active {
-      background: linear-gradient(180deg, #00d4ff, #0088bb);
-      border-color: #aef2ff;
-      color: #04141c;
-      box-shadow: 0 0 12px rgba(0,212,255,0.7);
+      background: linear-gradient(180deg, #ffd75e, #b8860b);
+      border-color: #fff3c4;
+      color: #241800;
+      box-shadow: 0 0 12px rgba(255,215,94,0.8);
+    }
+    /* Blue = your turn, red = opponent's — so the current phase color
+       alone tells you whose turn it is at a glance. */
+    .phase-icon.active.opp-turn {
+      background: linear-gradient(180deg, #ff4444, #aa1111);
+      border-color: #ffaaaa;
+      color: #200404;
+      box-shadow: 0 0 12px rgba(255,68,68,0.7);
     }
     .phase-icon-btn {
       width: 100%;
@@ -52,9 +60,14 @@
       cursor: pointer;
       animation: phasePulse 1.4s ease-in-out infinite;
     }
+    .phase-icon-btn.opp-turn { animation: phasePulseRed 1.4s ease-in-out infinite; }
     .phase-icon-btn:hover { box-shadow: 0 0 18px rgba(255,204,0,0.8); }
     @keyframes phasePulse {
       0%, 100% { box-shadow: 0 0 12px rgba(0,212,255,0.7); }
+      50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); }
+    }
+    @keyframes phasePulseRed {
+      0%, 100% { box-shadow: 0 0 12px rgba(255,68,68,0.7); }
       50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); }
     }
     /* A future phase you can jump straight to — clickable, but visually
@@ -84,14 +97,27 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: linear-gradient(90deg, #0d2036, #1a3a5c 60%, transparent);
-      border: 1px solid #2a5a8c;
+      background: linear-gradient(90deg, #16130a, #2a2210 60%, transparent);
+      border: 1px solid #a9862f;
       border-radius: 20px;
       padding: 6px 18px;
+      box-shadow: 0 0 10px rgba(212,175,55,0.25), inset 0 0 12px rgba(0,0,0,0.4);
     }
-    .lp-bar { position: relative; }
-    .lp-bar .name { font-weight: bold; font-size: 15px; color: #aee0ff; }
-    .lp-bar .lp-value { font-size: 26px; font-weight: bold; color: #00e5ff; text-shadow: 0 0 8px rgba(0,229,255,0.6); font-family: 'Consolas', monospace; }
+    .lp-bar { position: relative; overflow: hidden; }
+    .lp-gauge-track {
+      position: absolute; left: 0; top: 0; bottom: 0; right: 0;
+      background: rgba(0,0,0,0.35); z-index: 0;
+    }
+    .lp-gauge-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: linear-gradient(90deg, #1fae4a, #6fe08a);
+      transition: width 0.6s ease-out;
+      opacity: 0.35;
+    }
+    .lp-gauge-fill.opp { background: linear-gradient(90deg, #6fe08a, #1fae4a); }
+    .lp-bar .name, .lp-bar .lp-value, .lp-bar .arrow, .lp-bar .floating-damage { position: relative; z-index: 1; }
+    .lp-bar .name { font-weight: bold; font-size: 15px; color: #ffdf8e; text-shadow: 0 0 4px rgba(0,0,0,0.8); }
+    .lp-bar .lp-value { font-size: 26px; font-weight: bold; color: #ffe9a8; text-shadow: 0 0 8px rgba(255,204,0,0.6); font-family: 'Consolas', monospace; }
     .lp-bar .arrow { font-size: 18px; margin-left: 6px; }
     .lp-bar.opp .arrow { color: #ff5566; }
     .lp-bar.me .arrow { color: #55ff99; }
@@ -122,7 +148,7 @@
       background: linear-gradient(90deg, #1a0505, #2a0808);
       border: 2px solid #ff3344; border-radius: 12px; padding: 10px 20px;
       box-shadow: 0 0 24px rgba(255,51,68,0.6);
-      animation: toastIn 0.3s ease-out, toastOut 0.4s ease-in 2.6s forwards;
+      animation: toastIn 0.25s ease-out, toastOut 0.3s ease-in 1.7s forwards;
     }
     @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
     @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
@@ -142,6 +168,20 @@
       animation: swordFlash 0.6s ease-out 0.35s both;
       filter: drop-shadow(0 0 6px #ffcc00);
     }
+
+    /* Set-monster reveal: a proper 3D card flip (dims through a sideways
+       pose, then shows the real card) instead of the image just appearing. */
+    .clash-right.revealing {
+      animation: clashInRight 0.5s ease-out, cardFlip3D 0.7s ease-in-out 0.4s both;
+    }
+    @keyframes cardFlip3D {
+      0%   { transform: rotateY(0deg); filter: brightness(0.7); }
+      49%  { filter: brightness(0.4); }
+      50%  { transform: rotateY(90deg); filter: brightness(0.4); }
+      51%  { filter: brightness(0.7); }
+      100% { transform: rotateY(0deg); filter: brightness(1); }
+    }
+
     @keyframes swordFlash {
       0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
       50% { transform: scale(1.5) rotate(10deg); opacity: 1; }
@@ -274,6 +314,32 @@
       padding: 9px 22px; border-radius: 20px; cursor: pointer; font-size: 13px; text-decoration: none;
     }
 
+    .surrender-btn {
+      display: block; width: 100%; background: linear-gradient(180deg, #4a1420, #2a0a10);
+      color: #ffb0b0; border: 1px solid #7a2030; font-weight: bold;
+      padding: 6px 4px; border-radius: 10px; cursor: pointer; font-size: 10px;
+      letter-spacing: 0.5px;
+    }
+    .surrender-btn:hover { background: linear-gradient(180deg, #6a1c2a, #3a0e16); color: #ffd6d6; }
+
+    /* ---- Tag Force-style card frame coloring (applied to face-up cards
+       only, so face-down Sets don't leak monster/spell subtype info) ---- */
+    .card.frame-normal    { box-shadow: 0 0 0 2px #d4af37 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-effect     { box-shadow: 0 0 0 2px #e8792a inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-fusion    { box-shadow: 0 0 0 2px #a855c9 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-ritual    { box-shadow: 0 0 0 2px #4a90d9 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-synchro   { box-shadow: 0 0 0 2px #e8e8e8 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-xyz       { box-shadow: 0 0 0 2px #2b2b2b inset, 0 0 0 3px #555 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-token     { box-shadow: 0 0 0 2px #999999 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-spell     { box-shadow: 0 0 0 2px #2ecc71 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-trap      { box-shadow: 0 0 0 2px #d94fa8 inset, 0 2px 6px rgba(0,0,0,0.6); }
+
+    .new-duel-btn {
+      display: inline-block; margin-top: 8px; background: linear-gradient(180deg, #ffcf40, #b8860b);
+      color: #241800; border: 1px solid #ffe9a8; font-weight: bold;
+      padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 12px; text-decoration: none;
+    }
+
     .slot {
       border: 2px dashed #2a4a6c;
       border-radius: 6px;
@@ -326,11 +392,40 @@
     .action-btn.activate-btn { color: #ff66ff; }
     .action-btn:hover { background: rgba(0,0,0,0.92); }
 
+    .effect-badge {
+      position: absolute; top: -6px; left: -6px; width: 20px; height: 20px;
+      background: radial-gradient(circle, #ffe066, #cc8800);
+      border: 1px solid #fff3b0; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; z-index: 6; cursor: pointer;
+      box-shadow: 0 0 8px rgba(255,204,0,0.8);
+      animation: effectBadgePulse 1s ease-in-out infinite;
+    }
+    @keyframes effectBadgePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+
     .card.can-reposition { outline: 2px dashed #66ccff; cursor: pointer; }
     .card.can-attack { outline: 2px dashed #ff6633; cursor: pointer; box-shadow: 0 0 10px rgba(255,102,51,0.5); }
     .card.attacker-selected { outline: 3px solid #ff3333; box-shadow: 0 0 18px #ff3333; animation: attackerPulse 1s infinite; }
     @keyframes attackerPulse { 0%,100% { box-shadow: 0 0 10px #ff3333; } 50% { box-shadow: 0 0 22px #ff3333; } }
     .card.attack-target.target-eligible { outline: 3px dashed #ff3333; cursor: crosshair; animation: targetPulse 1s infinite; }
+    /* A hovering sword badge on anything you can currently attack, so
+       aiming at an opponent's monster actually feels like pointing a
+       weapon at it, not just clicking a highlighted box. */
+    .card.attack-target.target-eligible::after {
+      content: '⚔️';
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      font-size: 16px;
+      z-index: 5;
+      filter: drop-shadow(0 0 3px #000) drop-shadow(0 0 5px #ff3333);
+      animation: swordHover 0.8s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    @keyframes swordHover {
+      from { transform: translateY(0) rotate(-8deg); }
+      to { transform: translateY(-3px) rotate(8deg); }
+    }
     @keyframes targetPulse { 0%,100% { outline-color: #ff3333; } 50% { outline-color: #ff9999; } }
 
     .card.can-activate-set { outline: 2px dashed #ff66ff; cursor: pointer; }
@@ -343,7 +438,16 @@
       border: 1px solid #ff8877; color: #fff; font-weight: bold; font-size: 11px;
       border-radius: 6px; cursor: pointer; text-align: center;
     }
-    .direct-attack-zone.target-eligible-zone { animation: targetPulse 1s infinite; box-shadow: 0 0 14px #ff3333; }
+    .direct-attack-zone.target-eligible-zone { animation: targetPulse 1s infinite; box-shadow: 0 0 14px #ff3333; position: relative; }
+    .direct-attack-zone.target-eligible-zone::after {
+      content: '⚔️';
+      position: absolute;
+      top: -14px;
+      right: 4px;
+      font-size: 16px;
+      animation: swordHover 0.8s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
 
     .hand-strip {
       display: flex;
@@ -482,6 +586,23 @@
     const fusionOptions = game.getAvailableFusions(player1)
       .map(gc => ({ id: gc.instanceId, label: gc.card.name + " (ATK " + gc.card.atk + ")" }));
 
+    // Tag Force-style frame coloring: each card gets a border/name-plate
+    // color that matches its real TCG frame (Normal=gold, Effect=orange,
+    // Fusion=purple, Ritual=blue, Spell=green, Trap=magenta).
+    function frameClass(card) {
+      const t = (card.type || card.frameType || "").toLowerCase();
+      if (t.includes("fusion")) return "frame-fusion";
+      if (t.includes("ritual")) return "frame-ritual";
+      if (t.includes("synchro")) return "frame-synchro";
+      if (t.includes("xyz")) return "frame-xyz";
+      if (t.includes("token")) return "frame-token";
+      if (t.includes("effect")) return "frame-effect";
+      if (t.includes("normal") && t.includes("monster")) return "frame-normal";
+      if (t.includes("trap")) return "frame-trap";
+      if (t.includes("spell")) return "frame-spell";
+      return "frame-normal";
+    }
+
     function previewAttrs(gc, viewerIsOwner) {
       const visible = gc.faceUp || viewerIsOwner;
       return {
@@ -503,12 +624,21 @@
           return m.window === 'response' || m.window === 'anytime';
         })
       : [];
+
+    const handResponseEligibleCards = isMyResponse
+      ? game.getEligibleHandResponses(player1)
+      : [];
   %>
 
   <% if (typeof gameOver !== 'undefined' && gameOver) { %>
     <div class="game-over-banner">
       🏆 <%= winner.name %> WINS THE DUEL! 🏆
-      <div><a href="/game/start" class="restart-btn">🔄 RESTART DUEL</a></div>
+      <div>
+        <a href="/game/start" class="restart-btn">🔄 RESTART DUEL</a>
+        <form action="/game/new-duel" method="POST" style="display:inline-block; margin-left:8px;">
+          <button type="submit" class="new-duel-btn">🎴 NEW DUEL</button>
+        </form>
+      </div>
     </div>
   <% } %>
 
@@ -518,7 +648,7 @@
         <h3>⚠️ <%= pendingAttack.attacker.card.name %> is attacking
           <% if (pendingAttack.target) { %>your <%= pendingAttack.target.card.name %><% } else { %>you directly<% } %>!</h3>
         <p>Activate a Spell/Trap Card?</p>
-        <% if (responseEligibleCards.length > 0) { %>
+        <% if (responseEligibleCards.length > 0 || handResponseEligibleCards.length > 0) { %>
           <div class="response-options">
             <% responseEligibleCards.forEach(gc => { %>
               <% const pv = previewAttrs(gc, true); const m = game.getCardMeta(gc.card.name); %>
@@ -528,6 +658,16 @@
                    data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
                 <img src="<%= gc.card.image %>" />
                 <div class="rname"><%= gc.card.name %></div>
+              </div>
+            <% }) %>
+            <% handResponseEligibleCards.forEach(gc => { %>
+              <% const pv = previewAttrs(gc, true); %>
+              <div class="response-option-card hand-response-card"
+                   data-instance-id="<%= gc.instanceId %>"
+                   data-hand-response="true"
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+                <img src="<%= gc.card.image %>" />
+                <div class="rname">Discard <%= gc.card.name %></div>
               </div>
             <% }) %>
           </div>
@@ -562,7 +702,7 @@
           <div class="toast-damage" style="color:#66ccff;"><%= lastBattleEvent.destroyedNames.join(' & ') %> destroyed</div>
         <% } %>
       </div>
-      <% if (lastBattleEvent.targetImage) { %><img class="clash-right" src="<%= lastBattleEvent.targetImage %>" /><% } %>
+      <% if (lastBattleEvent.targetImage) { %><img class="clash-right<%= lastBattleEvent.targetWasRevealed ? ' revealing' : '' %>" src="<%= lastBattleEvent.targetImage %>" /><% } %>
     </div>
   <% } %>
 
@@ -579,25 +719,25 @@
       <div class="preview-desc" id="previewDesc"></div>
     </div>
 
-    <!-- PHASE SIDEBAR: the current phase passes on click; any LATER
+    <!-- PHASE SIDEBAR: every phase is now a real visible step (including
+         Draw/Standby/End) — the current phase passes on click; any LATER
          phase jumps straight there, skipping whatever's between (the AI
          side of a turn always still visits every phase in between via
          the exact same functions — this only changes what the human
-         chooses to click through). DP/SP auto-advance since there's
-         never a decision to make there. -->
-    <div class="phase-sidebar">
-      <div class="phase-icon <%= phase === 'draw' ? 'active' : '' %>">DP</div>
-      <div class="phase-icon <%= phase === 'standby' ? 'active' : '' %>">SP</div>
-      <%
-        const PHASE_ORDER = ['draw', 'standby', 'm1', 'battle', 'm2', 'end'];
-        const curIdx = PHASE_ORDER.indexOf(phase);
-        const turnActive = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
-      %>
-      <% [['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
+         chooses to click through). Blue = your turn, red = opponent's. -->
+    <%
+      const PHASE_ORDER = ['draw', 'standby', 'm1', 'battle', 'm2', 'end'];
+      const curIdx = PHASE_ORDER.indexOf(phase);
+      const turnActive = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
+      const turnSideClass = isPlayer1Turn ? 'my-turn' : 'opp-turn';
+    %>
+    <div class="phase-sidebar <%= turnSideClass %>">
+      <% [['draw','DP'], ['standby','SP'], ['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
         <% const p = pair[0], label = pair[1]; const pIdx = PHASE_ORDER.indexOf(p); %>
+        <% const autoPass = (p === 'draw' || p === 'standby' || p === 'end'); %>
         <% if (turnActive && phase === p) { %>
-          <form action="/game/next-phase" method="POST" style="margin:0;">
-            <button type="submit" class="phase-icon active phase-icon-btn" title="Pass this phase"><%= label %></button>
+          <form action="/game/next-phase" method="POST" style="margin:0;"<%- autoPass ? ' id="autoPhaseForm"' : '' %>>
+            <button type="submit" class="phase-icon active phase-icon-btn <%= turnSideClass %>" title="<%= autoPass ? 'Continues automatically' : 'Pass this phase' %>"><%= label %></button>
           </form>
         <% } else if (turnActive && pIdx > curIdx) { %>
           <form action="/game/goto-phase" method="POST" style="margin:0;">
@@ -605,9 +745,15 @@
             <button type="submit" class="phase-icon phase-icon-btn phase-icon-jump" title="Jump ahead to <%= label %>"><%= label %></button>
           </form>
         <% } else { %>
-          <div class="phase-icon <%= phase === p ? 'active' : '' %>"><%= label %></div>
+          <div class="phase-icon <%= phase === p ? 'active' : '' %> <%= phase === p ? turnSideClass : '' %>"><%= label %></div>
         <% } %>
       <% }) %>
+
+      <% if (!(typeof gameOver !== 'undefined' && gameOver)) { %>
+      <form action="/game/surrender" method="POST" style="margin:8px 0 0 0;" id="surrenderForm">
+        <button type="submit" class="surrender-btn" title="Concede this Duel">🏳 SURRENDER</button>
+      </form>
+      <% } %>
     </div>
 
     <!-- CENTER: FIELD -->
@@ -615,6 +761,7 @@
 
       <!-- OPPONENT LP -->
       <div class="lp-bar opp" id="lpBarOpp">
+        <div class="lp-gauge-track"><div class="lp-gauge-fill opp" style="width: <%= Math.max(0, Math.min(100, player2.lifePoints / 8000 * 100)) %>%;"></div></div>
         <span class="name"><%= player2.name %> <%= currentPlayer.name === player2.name ? '⚔' : '' %></span>
         <span><span class="lp-value"><%= player2.lifePoints %></span><span class="arrow">▼</span></span>
         <span class="floating-damage" id="floatDamageOpp"></span>
@@ -639,7 +786,7 @@
               <div class="slot" data-label="">
                 <% if(gameCard) { %>
                   <% const pv = previewAttrs(gameCard, false); %>
-                  <div class="card opponent-spelltrap-card <%= gameCard.faceUp ? '' : 'face-down' %>"
+                  <div class="card opponent-spelltrap-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
                        data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-image="<%= pv.image %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
@@ -654,7 +801,7 @@
               <div class="slot">
                 <% if(gameCard) { %>
                   <% const pv = previewAttrs(gameCard, false); %>
-                  <div class="card opponent-monster-card <%= gameCard.faceUp ? '' : 'face-down' %> <%= gameCard.position %> <%= inBattlePhase && canAct ? 'attack-target' : '' %>"
+                  <div class="card opponent-monster-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= gameCard.position %> <%= inBattlePhase && canAct ? 'attack-target' : '' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
                        data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
@@ -701,14 +848,19 @@
                       !gameCard.state.hasAttackedThisTurn &&
                       !gameCard.modifiers.cannotAttack;
                     const pv = previewAttrs(gameCard, true);
+                    const ignition = gameCard.faceUp && !gameCard.modifiers.effectsNegated ? game.getIgnitionMeta && game.getIgnitionMeta(gameCard.card.name) : null;
+                    const canUseIgnition = canActMain && ignition && ignition.canActivate(game, gameCard);
                   %>
-                  <div class="card own-monster-card <%= gameCard.faceUp ? '' : 'face-down' %> <%= gameCard.position %> <%= canReposition ? 'can-reposition' : '' %> <%= canDeclareAttack ? 'can-attack' : '' %>"
+                  <div class="card own-monster-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= gameCard.position %> <%= canReposition ? 'can-reposition' : '' %> <%= canDeclareAttack ? 'can-attack' : '' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
                        data-zone-index="<%= index %>"
                        data-can-reposition="<%= canReposition ? 'true' : 'false' %>"
                        data-can-attack="<%= canDeclareAttack ? 'true' : 'false' %>"
                        data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
+                    <% if (canUseIgnition) { %>
+                      <div class="effect-badge" data-action="monster-effect" data-instance-id="<%= gameCard.instanceId %>" data-needs-target="<%= ignition.needsTarget || '' %>" title="Activate Effect">⚡</div>
+                    <% } %>
                   </div>
                 <% } %>
               </div>
@@ -733,7 +885,7 @@
                     }
                     const pv2 = previewAttrs(gameCard, true);
                   %>
-                  <div class="card own-spelltrap-card <%= gameCard.faceUp ? '' : 'face-down' %> <%= canActivateSet ? 'can-activate-set' : '' %>"
+                  <div class="card own-spelltrap-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= canActivateSet ? 'can-activate-set' : '' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
                        data-can-activate="<%= canActivateSet ? 'true' : 'false' %>"
                        data-needs-target="<%= stMeta ? (stMeta.needsTarget || '') : '' %>"
@@ -766,10 +918,12 @@
             const isMonsterCard = game.isMonster(gameCard);
             const isSpellTrapCard = game.isSpellOrTrap(gameCard);
             const meta = game.getCardMeta(gameCard.card.name);
-            const requiredTributes = isMonsterCard ? game.getRequiredTributes(gameCard.card.level) : 0;
+            const tributeInfo = isMonsterCard ? game.getRequiredTributesForSummon(player1, gameCard) : { required: 0, creditsUsed: 0 };
+            const requiredTributes = tributeInfo.required;
+            const canUseOffering = game.controlsActiveUltimateOffering(player1) && player1.lifePoints > 500;
 
-            const canNormalSummon = isMonsterCard && canActMain && !actedThisWindow &&
-              player1.getMonstersOnField().length >= requiredTributes;
+            const canNormalSummon = isMonsterCard && canActMain && (!actedThisWindow || canUseOffering) &&
+              player1.getMonstersOnField().length >= requiredTributes && !gameCard.card.type.includes('Ritual');
 
             const freeSTSlot = player1.getFreeSpellTrapSlot() !== -1;
             const canSetST = isSpellTrapCard && canActMain && freeSTSlot;
@@ -783,7 +937,7 @@
             const showOverlay = canNormalSummon || canSetST || canActivateSpell;
             const pv3 = { name: gameCard.card.name, desc: gameCard.card.desc || "", atk: gameCard.card.atk !== undefined ? gameCard.card.atk : "", def: gameCard.card.def !== undefined ? gameCard.card.def : "", image: gameCard.card.image };
           %>
-          <div class="card player-hand-card"
+          <div class="card player-hand-card <%= frameClass(gameCard.card) %>"
                data-instance-id="<%= gameCard.instanceId %>"
                data-summonable="<%= showOverlay ? 'true' : 'false' %>"
                data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>">
@@ -791,9 +945,10 @@
             <img src="<%= gameCard.card.image %>" />
 
             <% if (canNormalSummon) { %>
+              <% const bonusTag = (actedThisWindow && canUseOffering) ? ' (500LP)' : ''; %>
               <div class="action-btn-row">
-                <div class="action-btn" data-action="summon" data-required-tributes="<%= requiredTributes %>">SUMMON<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %></div>
-                <div class="action-btn set-btn" data-action="set" data-required-tributes="<%= requiredTributes %>">SET<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %></div>
+                <div class="action-btn" data-action="summon" data-required-tributes="<%= requiredTributes %>">SUMMON<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %><%= bonusTag %></div>
+                <div class="action-btn set-btn" data-action="set" data-required-tributes="<%= requiredTributes %>">SET<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %><%= bonusTag %></div>
               </div>
             <% } else if (isSpellTrapCard && (canActivateSpell || canSetST)) { %>
               <div class="action-btn-row">
@@ -813,6 +968,7 @@
 
       <!-- PLAYER LP -->
       <div class="lp-bar me" id="lpBarMe">
+        <div class="lp-gauge-track"><div class="lp-gauge-fill me" style="width: <%= Math.max(0, Math.min(100, player1.lifePoints / 8000 * 100)) %>%;"></div></div>
         <span class="name"><%= player1.name %> <%= currentPlayer.name === player1.name ? '⚔' : '' %></span>
         <span><span class="arrow">▲</span><span class="lp-value"><%= player1.lifePoints %></span></span>
         <span class="floating-damage" id="floatDamageMe"></span>
@@ -858,7 +1014,16 @@
       // next one plays out. "Continue Now" skips the wait.
       const aiContinueForm = document.getElementById("aiContinueForm");
       if (aiContinueForm) {
-        setTimeout(() => aiContinueForm.submit(), 1400);
+        setTimeout(() => aiContinueForm.submit(), 900);
+      }
+
+      // Draw/Standby/End Phase have nothing to decide (for either
+      // player) — they're still shown as their own real step so you can
+      // see the card get drawn etc., but they pass themselves after a
+      // brief beat instead of waiting on a click every single turn.
+      const autoPhaseForm = document.getElementById("autoPhaseForm");
+      if (autoPhaseForm) {
+        setTimeout(() => autoPhaseForm.submit(), 600);
       }
 
       // Floating "-damage" number over whichever LP bar just got hit
@@ -874,7 +1039,7 @@
       <% } %>
 
       const toast = document.getElementById("battleToast");
-      if (toast) setTimeout(() => { toast.style.display = "none"; }, 3200);
+      if (toast) setTimeout(() => { toast.style.display = "none"; }, 2100);
 
       // ---------------------------------------------------
       // DRAW / DISCARD ANIMATIONS (Pot of Greed, Card Destruction, etc.)
@@ -1217,7 +1382,31 @@
       // ---------------------------------------------------
       // OWN FIELD MONSTERS: tribute-pick / target-pick / reposition / select-attacker
       // ---------------------------------------------------
+      // ---------------------------------------------------
+      // SURRENDER: confirm before conceding the duel
+      // ---------------------------------------------------
+      const surrenderForm = document.getElementById("surrenderForm");
+      if (surrenderForm) {
+        surrenderForm.addEventListener("submit", (e) => {
+          if (!confirm("Surrender this Duel? Your opponent will be declared the winner.")) {
+            e.preventDefault();
+          }
+        });
+      }
+
       const ownMonsterCards = document.querySelectorAll(".own-monster-card");
+
+      // Ignition monster effects (Breaker, Obelisk, Rabid Horseman, ...):
+      // a small ⚡ badge in the corner, separate from the card's own click.
+      document.querySelectorAll(".effect-badge").forEach(badge => {
+        badge.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const instanceId = badge.getAttribute("data-instance-id");
+          const needsTarget = badge.getAttribute("data-needs-target");
+          startActivation("/game/activate-monster-effect", instanceId, needsTarget || null);
+        });
+      });
 
       ownMonsterCards.forEach(card => {
         card.addEventListener("click", (e) => {
@@ -1347,6 +1536,14 @@
         card.addEventListener("click", (e) => {
           e.preventDefault();
           const instanceId = card.getAttribute("data-instance-id");
+          const isHandResponse = card.getAttribute("data-hand-response") === "true";
+
+          if (isHandResponse) {
+            // Kuriboh-style: discards straight from hand, no targeting.
+            startActivation("/game/activate-hand-card", instanceId, null);
+            return;
+          }
+
           const needsTarget = card.getAttribute("data-needs-target");
 
           // If this card needs us to click something on the field (a

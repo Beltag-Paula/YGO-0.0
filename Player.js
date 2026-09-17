@@ -60,12 +60,23 @@ class Player {
     return this.zone[zoneName];
   }
 
+  // Fill zones center-outward (like real duels/anime), not strictly
+  // left-to-right — small authenticity touch borrowed from another
+  // fan implementation.
+  static ZONE_FILL_ORDER = [2, 3, 1, 4, 0];
+
   getFreeMonsterSlot() {
-    return this.zone.monster.findIndex(slot => slot === null);
+    for (const i of Player.ZONE_FILL_ORDER) {
+      if (this.zone.monster[i] === null) return i;
+    }
+    return -1;
   }
 
   getFreeSpellTrapSlot() {
-    return this.zone.spellTrap.findIndex(slot => slot === null);
+    for (const i of Player.ZONE_FILL_ORDER) {
+      if (this.zone.spellTrap[i] === null) return i;
+    }
+    return -1;
   }
 
   getMonstersOnField() {
@@ -81,8 +92,10 @@ class Player {
     const zone = this.getZone(zoneName);
 
     if (this.isSlotZone(zoneName)) {
-      const index = zone.findIndex(slot => slot === null);
-      if (index === -1) {
+      const index = (zoneName === "monster" || zoneName === "spellTrap")
+        ? Player.ZONE_FILL_ORDER.find(i => zone[i] === null)
+        : zone.findIndex(slot => slot === null);
+      if (index === undefined || index === -1) {
         throw new Error(`No free slot in ${zoneName}`);
       }
       zone[index] = card;
@@ -117,6 +130,13 @@ class Player {
 
   // CRITICAL FIX: Encapsulated atomic transaction to ensure references remain clean
   moveCard(card, fromZone, toZone) {
+    // Tracks whether a card arriving in the Graveyard came directly from
+    // the field (battle, effect destruction, tribute) vs. elsewhere (hand
+    // discard) — several monster effects ("if this card is sent from the
+    // field to the GY...") only trigger for the former.
+    if (toZone === "graveyard") {
+      card._arrivedFromField = (fromZone === "monster");
+    }
     this.removeCard(card, fromZone);
     this.addCard(card, toZone);
   }

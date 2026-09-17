@@ -12,8 +12,12 @@
  *                            that react to an attack, e.g. Mirror Force)
  *             'anytime'   -> your Main Phase OR as a Battle Response
  *   needsTarget: 'monster' | 'spellTrap' | 'graveyardMonster' | undefined
- *   cost:     { lp: number } optional Life Point cost to pay on activation
+ *   cost:     { lp: number } optional Life Point cost to pay on activation,
+ *             or { tributeMinAtk: number } — activation requires tributing
+ *             one of your own field monsters with at least that much ATK.
  */
+
+const { Card, GameCard } = require("./CardLogic.js");
 
 function normalize(name) {
     return (name || "").trim().toLowerCase();
@@ -53,7 +57,18 @@ const SPELL_TRAP_META = {
     "polymerization": { kind: "spell", subtype: "normal", window: "main", needsTarget: "fusionMonster" },
     "de-fusion": { kind: "spell", subtype: "quickplay", window: "anytime", needsTarget: "monster" },
     "black luster ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" },
-    "black magic ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" }
+    "black magic ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" },
+
+    // --- Additional cards from the Yugi/Kaiba sample decks ---
+    "dragon capture jar": { kind: "trap", subtype: "continuous", window: "anytime" },
+    "ultimate offering": { kind: "trap", subtype: "continuous", window: "anytime" },
+    "cost down": { kind: "spell", subtype: "normal", window: "main" },
+    "enemy controller": { kind: "spell", subtype: "quickplay", window: "anytime", needsTarget: "monster" },
+    "megamorph": { kind: "spell", subtype: "equip", window: "main", needsTarget: "monster" },
+    "scapegoat": { kind: "spell", subtype: "normal", window: "main" },
+    "soul exchange": { kind: "spell", subtype: "normal", window: "main", needsTarget: "monster" },
+    "crush card virus": { kind: "trap", subtype: "normal", window: "anytime", cost: { tributeMinAtk: 1500 } },
+    "fiendish chain": { kind: "trap", subtype: "continuous", window: "anytime", needsTarget: "monster" }
 };
 
 // Fusion Monster recipes actually present in the sample decks.
@@ -375,6 +390,130 @@ const HANDLERS = {
         target.state.hasBeenSummonedThisTurn = true;
         gc.linkedTarget = target.instanceId;
         game.addLog(`👻 Call of the Haunted Special Summons ${target.card.name} from the Graveyard!`);
+    },
+
+    // --- Additional cards from the Yugi/Kaiba sample decks ---
+
+    "dragon capture jar": (game, gc) => {
+        let affected = 0;
+        [game.player1, game.player2].forEach(p => {
+            p.getMonstersOnField().filter(m => m.card.race === "Dragon").forEach(m => {
+                m.position = "defense";
+                m.modifiers.cannotChangePosition = true;
+                affected++;
+            });
+        });
+        game.addLog(`🏺 Dragon Capture Jar forces all Dragon-Type monsters into Defense Position${affected ? "" : " (none on the field yet)"}!`);
+    },
+
+    "ultimate offering": (game, gc) => {
+        game.addLog("💰 Ultimate Offering stays on the field — its controller may pay 500 LP for an extra Normal Summon/Set each turn.");
+    },
+
+    "cost down": (game, gc) => {
+        const p = gc.owner;
+        if (p.zone.hand.length === 0) {
+            game.addLog("⚠️ Cost Down has no card left to discard and fizzles.");
+            return;
+        }
+        const discard = p.zone.hand[p.zone.hand.length - 1];
+        p.moveCard(discard, "hand", "graveyard");
+        game.recordDiscard([{ playerIsPlayer1: p === game.player1, count: 1 }]);
+        p.costDownActive = true;
+        game.turnEffects.push(() => { p.costDownActive = false; });
+        game.addLog(`📉 ${p.name} discards ${discard.card.name} — monsters in hand are treated as Level 2 lower this turn!`);
+    },
+
+    "enemy controller": (game, gc, target) => {
+        if (!target) return;
+        const p = gc.owner;
+        const ownMonsters = p.getMonstersOnField().filter(m => m.instanceId !== gc.instanceId);
+        if (ownMonsters.length > 0) {
+            const tribute = ownMonsters.sort((a, b) => game.getAtk(a) - game.getAtk(b))[0];
+            p.moveCard(tribute, "monster", "graveyard");
+            temporaryControl(game, gc, target);
+            game.addLog(`🎮 Enemy Controller Tributes ${tribute.card.name} to take control of ${target.card.name}!`);
+        } else if (p.lifePoints > 800) {
+            p.dealDamage(800);
+            target.position = target.position === "attack" ? "defense" : "attack";
+            game.addLog(`🎮 Enemy Controller pays 800 LP to switch ${target.card.name} to ${target.position.toUpperCase()} Position!`);
+        } else {
+            game.addLog("⚠️ Enemy Controller has no monster to Tribute and not enough LP — it fizzles.");
+        }
+    },
+
+    "megamorph": (game, gc, target) => {
+        if (!target) return;
+        const opp = gc.owner === game.player1 ? game.player2 : game.player1;
+        const doubling = gc.owner.lifePoints < opp.lifePoints;
+        const factor = doubling ? 1 : -0.5;
+        const atkDelta = Math.floor(game.getAtk(target) * factor);
+        const defDelta = Math.floor(game.getDef(target) * factor);
+        tempStatBoostPermanent(game, target, atkDelta, defDelta);
+        gc.equippedTo = target.instanceId;
+        game.addLog(`🔀 Megamorph equips to ${target.card.name}, ${doubling ? "doubling" : "halving"} its ATK/DEF!`);
+    },
+
+    "scapegoat": (game, gc) => {
+        const p = gc.owner;
+        let made = 0;
+        for (let i = 0; i < 4; i++) {
+            if (p.getFreeMonsterSlot() === -1) break;
+            const tokenCard = new Card({
+                id: `token_${p.name}_${Date.now()}_${i}`,
+                name: "Sheep Token",
+                type: "Monster Token",
+                frameType: "token",
+                humanReadableCardType: "Token",
+                desc: "A sheep token Special Summoned by Scapegoat.",
+                race: "Fiend",
+                atk: 0,
+                def: 0,
+                level: 1,
+                attribute: "EARTH",
+                card_images: [{ image_url_small: gc.card.image }]
+            });
+            const tokenGC = new GameCard(tokenCard, p);
+            p.addCard(tokenGC, "monster");
+            tokenGC.faceUp = true;
+            tokenGC.position = "defense";
+            tokenGC.isToken = true;
+            made++;
+        }
+        game.addLog(`🐑 Scapegoat Special Summons ${made} Sheep Token(s) in Defense Position!`);
+    },
+
+    "soul exchange": (game, gc, target) => {
+        if (!target || target.owner === gc.owner) {
+            game.addLog("⚠️ Soul Exchange must target an opponent's monster.");
+            return;
+        }
+        const opp = target.owner;
+        const name = target.card.name;
+        opp.moveCard(target, "monster", "graveyard");
+        gc.owner.soulExchangeCredits = (gc.owner.soulExchangeCredits || 0) + 1;
+        game.turnEffects.push(() => { gc.owner.soulExchangeCredits = 0; });
+        game.addLog(`👻 Soul Exchange sends ${opp.name}'s ${name} to the Graveyard — ${gc.owner.name} may use it as a Tribute this turn!`);
+    },
+
+    "crush card virus": (game, gc) => {
+        const opponent = gc.owner === game.player1 ? game.player2 : game.player1;
+        const targets = opponent.getMonstersOnField().filter(m => game.getAtk(m) >= 1500);
+        if (targets.length === 0) {
+            game.addLog("☣️ Crush Card Virus finds no monster with 1500+ ATK to destroy.");
+            return;
+        }
+        [...targets].forEach(m => opponent.moveCard(m, "monster", "graveyard"));
+        game.addLog(`☣️ Crush Card Virus destroys every monster ${opponent.name} controls with 1500+ ATK!`);
+    },
+
+    "fiendish chain": (game, gc, target) => {
+        if (!target) return;
+        target.modifiers.cannotAttack = true;
+        target.modifiers.cannotChangePosition = true;
+        target.modifiers.effectsNegated = true;
+        gc.linkedTarget = target.instanceId;
+        game.addLog(`⛓️ Fiendish Chain negates ${target.card.name}'s effect and seals its attack/position change!`);
     }
 };
 
@@ -432,8 +571,303 @@ const FLIP_EFFECTS = {
         const name = target.card.name;
         target.owner.moveCard(target, "monster", "graveyard");
         game.addLog(`🐛 ${gc.card.name} FLIP: destroys ${name}!`);
+    },
+
+    "trap master": (game, gc) => {
+        const owner = gc.owner;
+        const opponent = owner === game.player1 ? game.player2 : game.player1;
+        const oppSets = opponent.getSpellTrapsOnField().filter(c => !c.faceUp);
+        const ownSets = owner.getSpellTrapsOnField().filter(c => !c.faceUp && c.instanceId !== gc.instanceId);
+        const target = oppSets.length > 0 ? oppSets[0] : ownSets[0];
+
+        if (!target) {
+            game.addLog(`${gc.card.name}'s FLIP effect has no Set card to check and fizzles.`);
+            return;
+        }
+
+        target.faceUp = true;
+        if (target.card.type.includes("Trap")) {
+            const name = target.card.name;
+            target.owner.moveCard(target, "spellTrap", "graveyard");
+            game.addLog(`🎯 ${gc.card.name} FLIP: reveals and destroys the Trap Card ${name}!`);
+        } else {
+            game.addLog(`🎯 ${gc.card.name} FLIP: reveals ${target.card.name} — it's a Spell, so it's returned face-down.`);
+            target.faceUp = false;
+        }
+    },
+
+    "morphing jar": (game, gc) => {
+        const discardEntries = [];
+        const drawEntries = [];
+        [game.player1, game.player2].forEach(p => {
+            const count = p.zone.hand.length;
+            [...p.zone.hand].forEach(c => p.moveCard(c, "hand", "graveyard"));
+            discardEntries.push({ playerIsPlayer1: p === game.player1, count });
+            p.drawCard(5);
+            drawEntries.push({ playerIsPlayer1: p === game.player1, count: 5 });
+        });
+        game.recordDiscard(discardEntries);
+        game.recordDraw(drawEntries);
+        game.addLog(`🏺 ${gc.card.name} FLIP: both players discard their hands and draw 5 new cards!`);
+    },
+
+    "cyber jar": (game, gc) => {
+        [game.player1, game.player2].forEach(p => {
+            [...p.getMonstersOnField()].forEach(m => p.moveCard(m, "monster", "graveyard"));
+        });
+        game.addLog(`🏺 ${gc.card.name} FLIP: destroys every monster on the field!`);
+
+        [game.player1, game.player2].forEach(p => {
+            const revealed = [];
+            for (let i = 0; i < 5 && p.zone.deck.length > 0; i++) revealed.push(p.zone.deck.shift());
+
+            const summoned = [];
+            const toHand = [];
+            revealed.forEach(c => {
+                if (game.isMonster(c) && (c.card.level || 0) <= 4 && p.getFreeMonsterSlot() !== -1) {
+                    p.addCard(c, "monster");
+                    c.faceUp = true;
+                    c.position = "attack";
+                    c.state.hasBeenSummonedThisTurn = true;
+                    summoned.push(c.card.name);
+                } else {
+                    p.addCard(c, "hand");
+                    toHand.push(c.card.name);
+                }
+            });
+            game.addLog(`${p.name} reveals: ${revealed.map(c => c.card.name).join(", ") || "nothing"}. Special Summons: ${summoned.join(", ") || "none"}. To hand: ${toHand.join(", ") || "none"}.`);
+        });
     }
 };
+
+// ------------------------------------------------------------------
+// ON-SUMMON TRIGGERS — fire immediately after a successful NORMAL
+// Summon (not Set, not Special Summon) of a named monster.
+// ------------------------------------------------------------------
+const ON_SUMMON_EFFECTS = {
+    "breaker the magical warrior": (game, gc) => {
+        gc.hasSpellCounter = true;
+        gc.modifiers.atk += 300;
+        game.addLog(`✨ ${gc.card.name} is armed with a Spell Counter (+300 ATK)! Its effect can remove the counter to destroy a Spell/Trap.`);
+    },
+    "ancient lamp": (game, gc) => {
+        const owner = gc.owner;
+        const laJinn = owner.zone.hand.find(c => normalize(c.card.name) === "la jinn the mystical genie of the lamp");
+        if (!laJinn) {
+            game.addLog(`${gc.card.name}'s effect finds no La Jinn the Mystical Genie of the Lamp in hand.`);
+            return;
+        }
+        if (owner.getFreeMonsterSlot() === -1) {
+            game.addLog(`⚠️ No free Monster Zone — ${gc.card.name}'s effect fizzles.`);
+            return;
+        }
+        owner.moveCard(laJinn, "hand", "monster");
+        laJinn.faceUp = true;
+        laJinn.position = "attack";
+        laJinn.state.hasBeenSummonedThisTurn = true;
+        game.addLog(`🧞 ${gc.card.name} Special Summons La Jinn the Mystical Genie of the Lamp from the hand!`);
+    }
+};
+
+function getOnSummon(cardName) {
+    return ON_SUMMON_EFFECTS[normalize(cardName)] || null;
+}
+
+function triggerOnSummon(game, gc) {
+    const handler = getOnSummon(gc.card.name);
+    if (!handler) return;
+    handler(game, gc);
+}
+
+// ------------------------------------------------------------------
+// IGNITION EFFECTS — monster effects the controller can manually
+// activate during their own Main Phase (once per turn per card, like
+// a Spell Speed 1 effect). Shown to the UI via getIgnition().
+// ------------------------------------------------------------------
+const IGNITION_EFFECTS = {
+    "breaker the magical warrior": {
+        needsTarget: "spellTrap",
+        canActivate: (game, gc) => !!gc.hasSpellCounter && !gc.state.hasUsedEffectThisTurn,
+        activate: (game, gc, target) => {
+            if (!target) { game.addLog("⚠️ No Spell/Trap Card to destroy."); return false; }
+            gc.hasSpellCounter = false;
+            gc.modifiers.atk -= 300;
+            gc.state.hasUsedEffectThisTurn = true;
+            const name = target.card.name;
+            target.owner.moveCard(target, "spellTrap", "graveyard");
+            game.addLog(`💥 ${gc.card.name} removes its Spell Counter to destroy ${name}!`);
+            return true;
+        }
+    },
+    "rabid horseman": {
+        needsTarget: "monster",
+        canActivate: (game, gc) => !gc.state.hasUsedEffectThisTurn,
+        activate: (game, gc, target) => {
+            if (!target || target.owner === gc.owner) { game.addLog("⚠️ Rabid Horseman needs an opposing monster to target."); return false; }
+            gc.state.hasUsedEffectThisTurn = true;
+            const name = target.card.name;
+            target.owner.moveCard(target, "monster", "graveyard");
+            game.addLog(`🐴 ${gc.card.name} destroys ${name}!`);
+            return true;
+        }
+    },
+    "obelisk the tormentor": {
+        needsTarget: null,
+        canActivate: (game, gc) => !gc.state.hasUsedEffectThisTurn &&
+            gc.owner.getMonstersOnField().filter(m => m.instanceId !== gc.instanceId).length >= 2,
+        activate: (game, gc) => {
+            const owner = gc.owner;
+            const others = owner.getMonstersOnField().filter(m => m.instanceId !== gc.instanceId);
+            if (others.length < 2) { game.addLog("⚠️ Obelisk the Tormentor needs 2 other monsters to Tribute."); return false; }
+            others.slice(0, 2).forEach(m => owner.moveCard(m, "monster", "graveyard"));
+            const opponent = owner === game.player1 ? game.player2 : game.player1;
+            [...game.player1.getMonstersOnField(), ...game.player2.getMonstersOnField()]
+                .filter(m => m.instanceId !== gc.instanceId)
+                .forEach(m => m.owner.moveCard(m, "monster", "graveyard"));
+            opponent.dealDamage(4000);
+            gc.state.hasUsedEffectThisTurn = true;
+            game.addLog(`🌩️ Obelisk the Tormentor Tributes 2 monsters, destroys every other monster on the field, and blasts ${opponent.name} for 4000 damage!`);
+            return true;
+        }
+    }
+};
+
+function getIgnition(cardName) {
+    return IGNITION_EFFECTS[normalize(cardName)] || null;
+}
+
+// ------------------------------------------------------------------
+// HAND-RESPONSE EFFECTS — activated straight from the hand during a
+// Battle Response Window (Kuriboh-style "hand traps").
+// ------------------------------------------------------------------
+const HAND_RESPONSE_EFFECTS = {
+    "kuriboh": {
+        window: "response",
+        activate: (game, gc) => {
+            const owner = gc.owner;
+            owner.moveCard(gc, "hand", "graveyard");
+            game.preventBattleDamageFor = owner;
+            game.addLog(`🐾 ${owner.name} discards Kuriboh — Battle Damage from this attack becomes 0!`);
+        }
+    }
+};
+
+function getHandResponseEffect(cardName) {
+    return HAND_RESPONSE_EFFECTS[normalize(cardName)] || null;
+}
+
+// Monsters whose battle damage pierces through Defense Position monsters.
+const PIERCING_MONSTERS = new Set(["spear dragon"]);
+function hasPiercing(cardName) {
+    return PIERCING_MONSTERS.has(normalize(cardName));
+}
+
+// Monsters that cannot declare a direct attack even with an empty
+// opposing field.
+const NO_DIRECT_ATTACK_MONSTERS = new Set(["spear dragon"]);
+function cannotAttackDirectly(cardName) {
+    return NO_DIRECT_ATTACK_MONSTERS.has(normalize(cardName));
+}
+
+// Monsters forced into Defense Position at the End Phase of any turn
+// they attacked in.
+const FORCED_DEFENSE_AFTER_ATTACK = new Set(["spear dragon"]);
+function forcedDefenseAfterAttack(cardName) {
+    return FORCED_DEFENSE_AFTER_ATTACK.has(normalize(cardName));
+}
+
+// Monsters that get to make a second attack the same turn if their
+// first attack destroys a monster by battle (once per turn).
+const CHAIN_ATTACK_ON_DESTROY = new Set(["gaia the dragon champion"]);
+function hasChainAttackOnDestroy(cardName) {
+    return CHAIN_ATTACK_ON_DESTROY.has(normalize(cardName));
+}
+
+// Lord of D. protects Dragon-Type monsters its controller owns from
+// being targeted by an OPPONENT's card (never its own controller's).
+function isProtectedByLordOfD(game, target, activatingPlayer) {
+    if (!target || (target.card.race || "") !== "Dragon") return false;
+    if (!activatingPlayer || activatingPlayer === target.owner) return false;
+    return target.owner.getSpellTrapsOnField().some(
+        c => c.faceUp && normalize(c.card.name) === "lord of d."
+    );
+}
+
+// ------------------------------------------------------------------
+// DYNAMIC STATS — monsters whose real ATK/DEF depends on live game
+// state rather than a fixed number (ygoprodeck lists these as -1/-1).
+// Returns { atk, def } to ADD on top of the card's printed stats.
+// ------------------------------------------------------------------
+const DYNAMIC_STATS = {
+    "slifer the sky dragon": (game, gc) => {
+        const bonus = gc.owner.zone.hand.length * 1000;
+        return { atk: bonus, def: bonus };
+    },
+    "blade knight": (game, gc) => {
+        return { atk: gc.owner.zone.hand.length <= 1 ? 400 : 0, def: 0 };
+    },
+    "buster blader": (game, gc) => {
+        const opponent = gc.owner === game.player1 ? game.player2 : game.player1;
+        const onField = opponent.getMonstersOnField().filter(m => m.card.race === "Dragon").length;
+        const inGY = opponent.zone.graveyard.filter(m => game.isMonster(m) && m.card.race === "Dragon").length;
+        return { atk: (onField + inGY) * 500, def: 0 };
+    },
+    "dark magician girl": (game, gc) => {
+        const count = gc.owner.zone.graveyard.filter(
+            m => game.isMonster(m) && (m.card.name === "Dark Magician" || m.card.name === "Magician of Black Chaos")
+        ).length;
+        return { atk: count * 300, def: 0 };
+    },
+    "dark paladin": (game, gc) => {
+        const dragonsOnField = [...game.player1.getMonstersOnField(), ...game.player2.getMonstersOnField()]
+            .filter(m => m.card.race === "Dragon").length;
+        const dragonsInGY = [...game.player1.zone.graveyard, ...game.player2.zone.graveyard]
+            .filter(m => game.isMonster(m) && m.card.race === "Dragon").length;
+        return { atk: (dragonsOnField + dragonsInGY) * 500, def: 0 };
+    }
+};
+
+function getDynamicStats(game, gc) {
+    const fn = DYNAMIC_STATS[normalize(gc.card.name)];
+    return fn ? fn(game, gc) : null;
+}
+
+// ------------------------------------------------------------------
+// GRAVEYARD-ARRIVAL (DEATH) TRIGGERS — "if this card is sent from the
+// field to the GY: ..."
+// ------------------------------------------------------------------
+const GY_TRIGGER_EFFECTS = {
+    "sangan": (game, gc) => {
+        const owner = gc.owner;
+        const candidates = owner.zone.deck.filter(c => game.isMonster(c) && (c.card.atk || 0) <= 1500);
+        if (candidates.length === 0) {
+            game.addLog(`${gc.card.name}'s effect finds no valid monster in the Deck.`);
+            return;
+        }
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        owner.moveCard(chosen, "deck", "hand");
+        owner.shuffleDeck();
+        game.addLog(`🔍 ${gc.card.name}'s effect adds ${chosen.card.name} from the Deck to ${owner.name}'s hand!`);
+    },
+    "witch of the black forest": (game, gc) => {
+        const owner = gc.owner;
+        const candidates = owner.zone.deck.filter(c => game.isMonster(c) && (c.card.def || 0) <= 1500);
+        if (candidates.length === 0) {
+            game.addLog(`${gc.card.name}'s effect finds no valid monster in the Deck.`);
+            return;
+        }
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        owner.moveCard(chosen, "deck", "hand");
+        owner.shuffleDeck();
+        game.addLog(`🔍 ${gc.card.name}'s effect adds ${chosen.card.name} from the Deck to ${owner.name}'s hand!`);
+    }
+};
+
+function triggerGYEffect(game, gc) {
+    const handler = GY_TRIGGER_EFFECTS[normalize(gc.card.name)];
+    if (!handler) return;
+    handler(game, gc);
+}
 
 function getFlipEffect(cardName) {
     return FLIP_EFFECTS[normalize(cardName)] || null;
@@ -445,4 +879,10 @@ function triggerFlip(game, gc) {
     handler(game, gc);
 }
 
-module.exports = { getMeta, getFusionRecipe, getRitualRecipe, activate, normalize, getFlipEffect, triggerFlip };
+module.exports = {
+    getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
+    getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
+    getOnSummon, triggerOnSummon, getIgnition,
+    getHandResponseEffect, hasPiercing, cannotAttackDirectly,
+    forcedDefenseAfterAttack, hasChainAttackOnDestroy, isProtectedByLordOfD
+};

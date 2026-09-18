@@ -105,7 +105,7 @@ class MainGame {
                 this.gameOver = true;
                 this.state.waitingForAction = false;
                 this.winner = this.opponentPlayer;
-                this.addLog(`\n🏆🏆🏆 ${this.currentPlayer.name} cannot draw — ${this.winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+                this.addLog(`\n ${this.currentPlayer.name} cannot draw — ${this.winner.name.toUpperCase()} WINS THE DUEL! `);
                 return;
             }
             this.currentPlayer.drawCard(1);
@@ -222,8 +222,8 @@ class MainGame {
         this.winner = winner;
         this.state.waitingForAction = false;
         this.state.awaitingResponse = false;
-        this.addLog(`\n🏳️ ${conceder.name} surrenders the Duel!`);
-        this.addLog(`\n🏆🏆🏆 ${winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+        this.addLog(`\n ${conceder.name} surrenders the Duel!`);
+        this.addLog(`\n ${winner.name.toUpperCase()} WINS THE DUEL! `);
     }
 
     endActionWindow() {
@@ -353,14 +353,14 @@ class MainGame {
 
         if (isBonusSummon) {
             p.dealDamage(500);
-            this.addLog(`💰 ${p.name} pays 500 LP to use Ultimate Offering for an extra Summon!`);
+            this.addLog(`${p.name} pays 500 LP to use Ultimate Offering for an extra Summon!`);
         }
         if (creditsUsed) p.soulExchangeCredits -= creditsUsed;
 
         p.normalSummonedThisTurn = true;
         this.state.actedThisWindow = true;
 
-        this.addLog(`⭐ ${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
+        this.addLog(`${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
         Effects.triggerOnSummon(this, gc);
         this.checkForWinner();
         return true;
@@ -397,7 +397,7 @@ class MainGame {
 
         if (isBonusSummon) {
             p.dealDamage(500);
-            this.addLog(`💰 ${p.name} pays 500 LP to use Ultimate Offering for an extra Set!`);
+            this.addLog(`${p.name} pays 500 LP to use Ultimate Offering for an extra Set!`);
         }
         if (creditsUsed) p.soulExchangeCredits -= creditsUsed;
 
@@ -434,11 +434,11 @@ class MainGame {
         if (ign.needsTarget) {
             target = this.resolveTarget({ needsTarget: ign.needsTarget }, targetInstanceId);
             if (ign.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, gc.owner)) {
-                this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
+                this.addLog(`Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
                 return false;
             }
             if (!target) {
-                this.addLog(`⚠️ ${gc.card.name} has no valid target.`);
+                this.addLog(`${gc.card.name} has no valid target.`);
                 return false;
             }
         }
@@ -493,7 +493,7 @@ class MainGame {
         gc.faceUp = true;
         gc.state.hasChangedPositionThisTurn = true;
 
-        this.addLog(`🔄 ${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
+        this.addLog(`${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
 
         // Flip Summon: a face-down monster turning face-up triggers its
         // FLIP effect (if it has one programmed).
@@ -550,11 +550,11 @@ class MainGame {
         const defenderMonsters = defender.getMonstersOnField();
 
         if (!target && Effects.cannotAttackDirectly(attacker.card.name)) {
-            this.addLog(`❌ ${attacker.card.name} cannot declare a direct attack.`);
+            this.addLog(`${attacker.card.name} cannot declare a direct attack.`);
             return false;
         }
         if (!target && defenderMonsters.length > 0) {
-            this.addLog(`❌ ${attacker.card.name} cannot attack directly while ${defender.name} controls monsters.`);
+            this.addLog(`${attacker.card.name} cannot attack directly while ${defender.name} controls monsters.`);
             return false;
         }
         if (target && (target.owner !== defender || target.location !== "monster")) return false;
@@ -563,9 +563,9 @@ class MainGame {
         this.pendingAttack = { attacker, target };
 
         if (target) {
-            this.addLog(`⚔️  ${attacker.card.name} declares an attack on ${target.card.name}!`);
+            this.addLog(`${attacker.card.name} declares an attack on ${target.card.name}!`);
         } else {
-            this.addLog(`⚔️  ${attacker.card.name} declares a direct attack!`);
+            this.addLog(`${attacker.card.name} declares a direct attack!`);
         }
 
         const eligible = this.getEligibleResponses(defender);
@@ -605,7 +605,7 @@ class MainGame {
         const dealDamage = (player, amount) => {
             if (amount <= 0) return 0;
             if (this.preventBattleDamageFor === player) {
-                this.addLog(`🛡️ ${player.name} takes no battle damage this turn.`);
+                this.addLog(`${player.name} takes no battle damage this turn.`);
                 return 0;
             }
             player.dealDamage(amount);
@@ -614,7 +614,7 @@ class MainGame {
 
         const destroy = (ownerPlayer, gc) => {
             if (this.preventDestructionFor === ownerPlayer) {
-                this.addLog(`🛡️ ${gc.card.name} cannot be destroyed by battle this turn.`);
+                this.addLog(`${gc.card.name} cannot be destroyed by battle this turn.`);
                 return false;
             }
             ownerPlayer.moveCard(gc, "monster", "graveyard");
@@ -631,7 +631,7 @@ class MainGame {
                 const dealt = dealDamage(this.currentPlayer, dmg);
                 event.damage = dealt;
                 event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
-                if (dealt > 0) this.addLog(`💥 ${this.currentPlayer.name} takes ${dealt} reflected damage!`);
+                if (dealt > 0) this.addLog(`${this.currentPlayer.name} takes ${dealt} reflected damage!`);
             }
         } else if (attacker.location !== "monster") {
             this.addLog(`${attacker.card.name} was destroyed before damage could be applied.`);
@@ -640,7 +640,7 @@ class MainGame {
             const dealt = dealDamage(this.opponentPlayer, dmg);
             event.damage = dealt;
             event.damagedPlayerIsPlayer1 = this.opponentPlayer === this.player1;
-            this.addLog(`💥 ${attacker.card.name} hits directly for ${dealt} damage! (${this.opponentPlayer.name} LP: ${this.opponentPlayer.lifePoints})`);
+            this.addLog(`${attacker.card.name} hits directly for ${dealt} damage! (${this.opponentPlayer.name} LP: ${this.opponentPlayer.lifePoints})`);
         } else if (target.location !== "monster") {
             this.addLog(`The attack fizzles — ${target.card.name} is no longer on the field.`);
         } else {
@@ -654,17 +654,17 @@ class MainGame {
                     const dealt = dealDamage(defender, atkVal - defVal);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = defender === this.player1;
-                    this.addLog(`💥 ${target.card.name} destroyed! ${defender.name} takes ${dealt} damage.`);
+                    this.addLog(`${target.card.name} destroyed! ${defender.name} takes ${dealt} damage.`);
                 } else if (atkVal < defVal) {
                     destroy(this.currentPlayer, attacker);
                     const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
-                    this.addLog(`💥 ${attacker.card.name} destroyed! ${this.currentPlayer.name} takes ${dealt} damage.`);
+                    this.addLog(`${attacker.card.name} destroyed! ${this.currentPlayer.name} takes ${dealt} damage.`);
                 } else {
                     destroy(defender, target);
                     destroy(this.currentPlayer, attacker);
-                    this.addLog("💥 Both monsters are destroyed in the collision!");
+                    this.addLog("Both monsters are destroyed in the collision!");
                 }
             } else {
                 const defVal = this.getDef(target);
@@ -676,20 +676,20 @@ class MainGame {
 
                 if (atkVal > defVal) {
                     destroy(defender, target);
-                    this.addLog(`💥 ${target.card.name} destroyed!`);
+                    this.addLog(`${target.card.name} destroyed!`);
                     if (Effects.hasPiercing(attacker.card.name)) {
                         const pierce = dealDamage(defender, atkVal - defVal);
                         if (pierce > 0) {
                             event.damage = pierce;
                             event.damagedPlayerIsPlayer1 = defender === this.player1;
-                            this.addLog(`🗡️ ${attacker.card.name}'s piercing damage hits ${defender.name} for ${pierce}!`);
+                            this.addLog(`${attacker.card.name}'s piercing damage hits ${defender.name} for ${pierce}!`);
                         }
                     }
                 } else if (atkVal < defVal) {
                     const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
-                    this.addLog(`💥 ${this.currentPlayer.name} takes ${dealt} damage from the rebound!`);
+                    this.addLog(`${this.currentPlayer.name} takes ${dealt} damage from the rebound!`);
                 } else {
                     this.addLog("No monster destroyed (ATK = DEF).");
                 }
@@ -707,7 +707,7 @@ class MainGame {
             attacker._usedChainAttackThisTurn = true;
             attacker.state.hasAttackedThisTurn = false;
             this.turnEffects.push(() => { attacker._usedChainAttackThisTurn = false; });
-            this.addLog(`⚔️ ${attacker.card.name} may attack again this turn!`);
+            this.addLog(`${attacker.card.name} may attack again this turn!`);
         }
 
         // Spear Dragon-style monsters flip to Defense Position at the End
@@ -716,7 +716,7 @@ class MainGame {
             this.turnEffects.push(() => {
                 if (attacker.location === "monster") {
                     attacker.position = "defense";
-                    this.addLog(`🔻 ${attacker.card.name} is switched to Defense Position after attacking.`);
+                    this.addLog(`${attacker.card.name} is switched to Defense Position after attacking.`);
                 }
             });
         }
@@ -742,7 +742,7 @@ class MainGame {
                 const stillThere = this.findMonsterAnywhereOnField(gc.equippedTo);
                 if (!stillThere) {
                     owner.moveCard(gc, "spellTrap", "graveyard");
-                    this.addLog(`💔 ${gc.card.name} is destroyed — the monster it was equipped to left the field.`);
+                    this.addLog(`${gc.card.name} is destroyed — the monster it was equipped to left the field.`);
                 }
             });
         });
@@ -773,7 +773,7 @@ class MainGame {
             this.gameOver = true;
             this.state.waitingForAction = false;
             this.winner = this.player1.lifePoints <= 0 ? this.player2 : this.player1;
-            this.addLog(`\n🏆🏆🏆 ${this.winner.name.toUpperCase()} WINS THE DUEL! 🏆🏆🏆`);
+            this.addLog(`\n ${this.winner.name.toUpperCase()} WINS THE DUEL! `);
         }
     }
 
@@ -835,29 +835,33 @@ class MainGame {
         // Per the rulebook: Normal Spells only in your Main Phase; Quick-Play
         // Spells ("anytime") can also be cast during your own Battle Phase.
         if (this.phase === "battle" && meta.window !== "anytime") {
-            this.addLog(`⚠️ ${gc.card.name} can only be activated during a Main Phase.`);
+            this.addLog(`${gc.card.name} can only be activated during a Main Phase.`);
             return false;
         }
         if (this.phase !== "m1" && this.phase !== "m2" && this.phase !== "battle") return false;
 
         if (meta.cost?.lp && p.lifePoints <= meta.cost.lp) {
-            this.addLog(`⚠️ Not enough Life Points to activate ${gc.card.name}.`);
+            this.addLog(`Not enough Life Points to activate ${gc.card.name}.`);
             return false;
         }
         if (p.getFreeSpellTrapSlot() === -1) return false;
 
         if (meta.precheck === "ritual" && !this.canRitualSummon(p, gc)) {
-            this.addLog(`⚠️ Cannot Ritual Summon with ${gc.card.name} right now (need the matching Ritual Monster in hand and enough Tribute Levels).`);
+            this.addLog(`Cannot Ritual Summon with ${gc.card.name} right now (need the matching Ritual Monster in hand and enough Tribute Levels).`);
+            return false;
+        }
+        if (meta.precheck === "controlsBlueEyes" && !this.controlsCard(p, "Blue-Eyes White Dragon")) {
+            this.addLog(`${gc.card.name} requires you to control "Blue-Eyes White Dragon" on the field.`);
             return false;
         }
 
         const target = this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
-            this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
+            this.addLog(`${gc.card.name} has no valid target and cannot be activated.`);
             return false;
         }
         if (meta.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, p)) {
-            this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
+            this.addLog(`Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
             return false;
         }
 
@@ -867,7 +871,7 @@ class MainGame {
 
         if (meta.cost?.lp) p.dealDamage(meta.cost.lp);
 
-        this.addLog(`📜 ${p.name} activates ${gc.card.name}!`);
+        this.addLog(`${p.name} activates ${gc.card.name}!`);
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
@@ -921,11 +925,11 @@ class MainGame {
 
         const materials = this.findFusionMaterials(player, recipe.materials);
         if (!materials) {
-            this.addLog(`⚠️ Missing Fusion Material for ${extraCard.card.name}.`);
+            this.addLog(`Missing Fusion Material for ${extraCard.card.name}.`);
             return false;
         }
         if (player.getFreeMonsterSlot() === -1) {
-            this.addLog("⚠️ No free Monster Zone — Fusion Summon fizzles.");
+            this.addLog("No free Monster Zone — Fusion Summon fizzles.");
             return false;
         }
 
@@ -938,7 +942,7 @@ class MainGame {
         extraCard.state.hasBeenSummonedThisTurn = true;
 
         const verb = recipe.method === "banish" ? "banishing" : "sending to the GY";
-        this.addLog(`✨ ${player.name} Special Summons ${extraCard.card.name} by ${verb} ${materials.map(m => m.card.name).join(" + ")}!`);
+        this.addLog(`${player.name} Special Summons ${extraCard.card.name} by ${verb} ${materials.map(m => m.card.name).join(" + ")}!`);
         this.checkForWinner();
         return true;
     }
@@ -972,11 +976,11 @@ class MainGame {
             gc => Effects.normalize(gc.card.name) === Effects.normalize(recipe.summons)
         );
         if (!ritualMonster) {
-            this.addLog(`⚠️ You don't have ${recipe.summons} in hand to Ritual Summon.`);
+            this.addLog(`You don't have ${recipe.summons} in hand to Ritual Summon.`);
             return false;
         }
         if (player.getFreeMonsterSlot() === -1) {
-            this.addLog("⚠️ No free Monster Zone — Ritual Summon fizzles.");
+            this.addLog("No free Monster Zone — Ritual Summon fizzles.");
             return false;
         }
 
@@ -996,7 +1000,7 @@ class MainGame {
         }
 
         if (totalLevel < recipe.tributeLevel) {
-            this.addLog(`⚠️ Not enough monsters to Tribute for ${ritualSpellGC.card.name} (need total Level ${recipe.tributeLevel}).`);
+            this.addLog(`Not enough monsters to Tribute for ${ritualSpellGC.card.name} (need total Level ${recipe.tributeLevel}).`);
             return false;
         }
 
@@ -1007,9 +1011,17 @@ class MainGame {
         ritualMonster.position = "attack";
         ritualMonster.state.hasBeenSummonedThisTurn = true;
 
-        this.addLog(`🔮 ${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
+        this.addLog(`${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
         this.checkForWinner();
         return true;
+    }
+
+    // True if `player`currently controls a face-up monster on the field
+    // with this exact name — used for "if you control X" Spell prechecks
+    // like Burst Stream of Destruction.
+    controlsCard(player, cardName) {
+        const target = Effects.normalize(cardName);
+        return player.getMonstersOnField().some(m => m.faceUp && Effects.normalize(m.card.name) === target);
     }
 
     // Sets any Spell or Trap face-down in the Spell/Trap Zone.
@@ -1058,7 +1070,11 @@ class MainGame {
             return false;
         }
         if (meta.cost?.lp && owner.lifePoints <= meta.cost.lp) {
-            this.addLog(`⚠️ Not enough Life Points to activate ${gc.card.name}.`);
+            this.addLog(`Not enough Life Points to activate ${gc.card.name}.`);
+            return false;
+        }
+        if (meta.precheck === "controlsBlueEyes" && !this.controlsCard(owner, "Blue-Eyes White Dragon")) {
+            this.addLog(`${gc.card.name} requires you to control "Blue-Eyes White Dragon" on the field.`);
             return false;
         }
 
@@ -1068,18 +1084,18 @@ class MainGame {
                 .filter(m => this.getAtk(m) >= meta.cost.tributeMinAtk)
                 .sort((a, b) => this.getAtk(b) - this.getAtk(a))[0];
             if (!costTribute) {
-                this.addLog(`⚠️ ${gc.card.name} requires Tributing a monster with ${meta.cost.tributeMinAtk}+ ATK — none available.`);
+                this.addLog(`${gc.card.name} requires Tributing a monster with ${meta.cost.tributeMinAtk}+ ATK — none available.`);
                 return false;
             }
         }
 
         const target = this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
-            this.addLog(`⚠️ ${gc.card.name} has no valid target and cannot be activated.`);
+            this.addLog(`${gc.card.name} has no valid target and cannot be activated.`);
             return false;
         }
         if (meta.needsTarget === "monster" && Effects.isProtectedByLordOfD(this, target, owner)) {
-            this.addLog(`🛡️ Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
+            this.addLog(`Lord of D. negates the activation — ${target.card.name} cannot be targeted!`);
             return false;
         }
 
@@ -1088,10 +1104,10 @@ class MainGame {
         if (meta.cost?.lp) owner.dealDamage(meta.cost.lp);
         if (costTribute) {
             owner.moveCard(costTribute, "monster", "graveyard");
-            this.addLog(`💀 ${owner.name} Tributes ${costTribute.card.name} to activate ${gc.card.name}.`);
+            this.addLog(`${owner.name} Tributes ${costTribute.card.name} to activate ${gc.card.name}.`);
         }
 
-        this.addLog(`📜 ${owner.name} activates the set card ${gc.card.name}!`);
+        this.addLog(`${owner.name} activates the set card ${gc.card.name}!`);
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
@@ -1127,7 +1143,7 @@ class MainGame {
         while (player.zone.hand.length > 6) {
             const card = player.zone.hand[player.zone.hand.length - 1];
             player.moveCard(card, "hand", "graveyard");
-            this.addLog(`🗑️ ${player.name} discards ${card.card.name} (hand size limit of 6).`);
+            this.addLog(`${player.name} discards ${card.card.name} (hand size limit of 6).`);
         }
     }
 
@@ -1155,7 +1171,7 @@ class MainGame {
 
     renderPlaymat() {
         if (this.gameOver) {
-            console.log(`\n🏆 DUEL OVER — ${this.winner.name} WINS! 🏆`);
+            console.log(`\n DUEL OVER — ${this.winner.name} WINS! `);
         }
         console.log("\n=========== PLAYMAT ===========");
         this.renderPlayer(this.opponentPlayer, "TOP - Opponent");

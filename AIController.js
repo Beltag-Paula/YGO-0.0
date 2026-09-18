@@ -121,6 +121,7 @@ function actMainPhase(game) {
         // activation every loop (that would never mark actedThisWindow
         // and would spin forever).
         if (meta.precheck === "ritual" && !game.canRitualSummon(p, gc)) return false;
+        if (meta.precheck === "controlsBlueEyes" && !game.controlsCard(p, "Blue-Eyes White Dragon")) return false;
         if (meta.cost?.lp && p.lifePoints <= meta.cost.lp) return false;
         return true;
     });

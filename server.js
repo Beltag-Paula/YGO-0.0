@@ -17,6 +17,9 @@ const { buildDeckJSON } = require('./gimmeDeck.js');
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Serve avatar art (and any other static assets dropped in views/images)
+app.use('/images', express.static(path.join(__dirname, 'views', 'images')));
+
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json()); // Added to smoothly read incoming JSON payloads if needed later
@@ -90,8 +93,8 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------
 app.listen(PORT, () => {
     console.log(`\n==================================================`);
-    console.log(`⚔️  YGO Duel Engine Server Online!`);
-    console.log(`🚀 Play Arena Mat: http://localhost:${PORT}/game/start`);
-    console.log(`🏠 Home Base View:  http://localhost:${PORT}/`);
+    console.log(`YGO Duel Engine Server Online!`);
+    console.log(`Play Arena Mat: http://localhost:${PORT}/game/start`);
+    console.log(`Home Base View: http://localhost:${PORT}/`);
     console.log(`==================================================\n`);
 });

@@ -18,6 +18,9 @@ class Card {
         this.attribute = data.attribute;
 
         this.image = data.card_images?.[0]?.image_url_small;
+        // Full artwork-only crop (no card frame/text) — used for the
+        // zoomed card preview panel.
+        this.imageCropped = data.card_images?.[0]?.image_url_cropped || this.image;
     }
 }
 

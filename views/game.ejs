@@ -320,10 +320,20 @@
       padding: 8px 20px;
       border-radius: 4px;
     }
-    .top-header .header-side { display: flex; align-items: baseline; gap: 10px; }
+    .top-header .header-side { display: flex; align-items: center; gap: 10px; }
     .top-header .header-side.opp-side { flex-direction: row; }
     .top-header .header-side.me-side { flex-direction: row-reverse; }
-    .top-header .header-lp { font-size: 26px; font-weight: bold; color: #ffe14d; font-family: 'Consolas', monospace; }
+    .top-header .header-avatar {
+      width: 52px; height: 52px; border-radius: 6px; object-fit: cover;
+      border: 2px solid #445; box-shadow: 0 0 6px rgba(0,0,0,0.6);
+    }
+    .top-header .header-avatar.active-turn {
+      border-color: #7fdfff; box-shadow: 0 0 14px rgba(127,223,255,0.9);
+    }
+    .top-header .header-lp-name { display: flex; flex-direction: column; line-height: 1.15; }
+    .top-header .header-side.me-side .header-lp-name { align-items: flex-end; }
+    .top-header .header-lp { font-size: 26px; font-weight: bold; color: #ffe14d; font-family: 'Consolas', monospace; transition: color 0.15s; }
+    .top-header .header-lp.lp-hit { color: #ff4d4d; text-shadow: 0 0 10px rgba(255,77,77,0.9); }
     .top-header .header-name { font-size: 20px; color: #fff; font-weight: 500; }
     .top-header .header-name.active-turn { color: #7fdfff; text-shadow: 0 0 8px rgba(127,223,255,0.8); }
     .top-header .header-turn { text-align: center; }
@@ -419,11 +429,11 @@
     .action-btn:hover { background: rgba(0,0,0,0.92); }
 
     .effect-badge {
-      position: absolute; top: -6px; left: -6px; width: 20px; height: 20px;
+      position: absolute; top: -6px; left: -6px; width: 22px; height: 22px;
       background: radial-gradient(circle, #ffe066, #cc8800);
       border: 1px solid #fff3b0; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 12px; z-index: 6; cursor: pointer;
+      font-size: 9px; font-weight: bold; color: #402800; z-index: 6; cursor: pointer;
       box-shadow: 0 0 8px rgba(255,204,0,0.8);
       animation: effectBadgePulse 1s ease-in-out infinite;
     }
@@ -438,7 +448,7 @@
        aiming at an opponent's monster actually feels like pointing a
        weapon at it, not just clicking a highlighted box. */
     .card.attack-target.target-eligible::after {
-      content: '⚔️';
+      content: ' ';
       position: absolute;
       top: 2px;
       right: 2px;
@@ -466,7 +476,7 @@
     }
     .direct-attack-zone.target-eligible-zone { animation: targetPulse 1s infinite; box-shadow: 0 0 14px #ff3333; position: relative; }
     .direct-attack-zone.target-eligible-zone::after {
-      content: '⚔️';
+      content: ' ';
       position: absolute;
       top: -14px;
       right: 4px;
@@ -511,11 +521,12 @@
       top: 10px;
     }
     .preview-image-wrap {
-      width: 100%; height: 240px; border-radius: 6px; overflow: hidden;
+      width: 100%; height: 270px; border-radius: 6px; overflow: hidden;
       background: #0a1420; border: 1px solid #234; display: flex; align-items: center; justify-content: center;
       margin-bottom: 10px;
+      box-shadow: 0 0 14px rgba(0,150,255,0.25) inset;
     }
-    .preview-image-wrap img { width: 100%; height: 100%; object-fit: cover; display: none; }
+    .preview-image-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; display: none; }
     .preview-placeholder { color: #345; font-size: 12px; text-align: center; padding: 10px; }
     .preview-name { font-weight: bold; font-size: 15px; color: #ffcc00; margin-bottom: 4px; }
     .preview-stats { font-size: 12px; color: #7fdfff; margin-bottom: 8px; font-family: Consolas, monospace; }
@@ -637,7 +648,8 @@
         atk: visible && gc.card.atk !== undefined ? gc.card.atk : "",
         def: visible && gc.card.def !== undefined ? gc.card.def : "",
         level: visible && gc.card.level ? gc.card.level : "",
-        image: visible ? gc.card.image : ""
+        image: visible ? gc.card.image : "",
+        imageCropped: visible ? (gc.card.imageCropped || gc.card.image) : ""
       };
     }
 
@@ -658,9 +670,9 @@
 
   <% if (typeof gameOver !== 'undefined' && gameOver) { %>
     <div class="game-over-banner">
-      🏆 <%= winner.name %> WINS THE DUEL! 🏆
+      <%= winner.name %> WINS THE DUEL!
       <div>
-        <a href="/game/start" class="restart-btn">🔄 RESTART DUEL</a>
+        <a href="/game/start" class="restart-btn">RESTART DUEL</a>
       </div>
     </div>
   <% } %>
@@ -668,7 +680,7 @@
   <% if (isMyResponse) { %>
     <div class="response-modal-overlay" id="responseModalOverlay">
       <div class="response-modal">
-        <h3>⚠️ <%= pendingAttack.attacker.card.name %> is attacking
+        <h3> <%= pendingAttack.attacker.card.name %> is attacking
           <% if (pendingAttack.target) { %>your <%= pendingAttack.target.card.name %><% } else { %>you directly<% } %>!</h3>
         <p>Activate a Spell/Trap Card?</p>
         <% if (responseEligibleCards.length > 0 || handResponseEligibleCards.length > 0) { %>
@@ -678,7 +690,7 @@
               <div class="response-option-card"
                    data-instance-id="<%= gc.instanceId %>"
                    data-needs-target="<%= m.needsTarget || '' %>"
-                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
                 <img src="<%= gc.card.image %>" />
                 <div class="rname"><%= gc.card.name %></div>
               </div>
@@ -688,7 +700,7 @@
               <div class="response-option-card hand-response-card"
                    data-instance-id="<%= gc.instanceId %>"
                    data-hand-response="true"
-                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
                 <img src="<%= gc.card.image %>" />
                 <div class="rname">Discard <%= gc.card.name %></div>
               </div>
@@ -698,7 +710,7 @@
           <p style="color:#889;">You have no Set cards that can respond.</p>
         <% } %>
         <form action="/game/pass-response" method="POST">
-          <button type="submit" class="no-response-btn">No — Take It ➔</button>
+          <button type="submit" class="no-response-btn">No — Take It </button>
         </form>
       </div>
     </div>
@@ -716,7 +728,7 @@
   <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && !isMyResponse) { %>
     <div class="battle-toast-overlay" id="battleToast">
       <img class="clash-left" src="<%= lastBattleEvent.attackerImage %>" />
-      <div class="clash-sword">⚔️</div>
+      <div class="clash-sword">&times;</div>
       <div class="toast-info">
         <div class="vs-text"><%= lastBattleEvent.attackerName %> <%= lastBattleEvent.wasDirect ? 'attacks directly!' : ('attacks ' + lastBattleEvent.targetName + '!') %></div>
         <% if (lastBattleEvent.damage > 0) { %>
@@ -729,18 +741,33 @@
     </div>
   <% } %>
 
+  <%
+    function avatarFor(name) {
+      if (/kaiba/i.test(name)) return '/images/Kaiba-MDDG.png';
+      if (/yugi/i.test(name)) return '/images/YamiYugi-MDDG.png';
+      return '';
+    }
+  %>
   <div class="top-header">
     <div class="header-side opp-side">
-      <span class="header-lp"><%= player2.lifePoints %></span>
-      <span class="header-name <%= currentPlayer === player2 ? 'active-turn' : '' %>"><%= player2.name %></span>
+      <% const oppAvatar = avatarFor(player2.name); %>
+      <% if (oppAvatar) { %><img class="header-avatar <%= currentPlayer === player2 ? 'active-turn' : '' %>" src="<%= oppAvatar %>" alt="<%= player2.name %>"><% } %>
+      <div class="header-lp-name">
+        <span class="header-lp" id="headerLpOpp"><%= player2.lifePoints %></span>
+        <span class="header-name <%= currentPlayer === player2 ? 'active-turn' : '' %>"><%= player2.name %></span>
+      </div>
     </div>
     <div class="header-turn">
       <div class="turn-label">TURN</div>
       <div class="turn-num"><%= game.turn %></div>
     </div>
     <div class="header-side me-side">
-      <span class="header-name <%= currentPlayer === player1 ? 'active-turn' : '' %>"><%= player1.name %></span>
-      <span class="header-lp"><%= player1.lifePoints %></span>
+      <% const meAvatar = avatarFor(player1.name); %>
+      <% if (meAvatar) { %><img class="header-avatar <%= currentPlayer === player1 ? 'active-turn' : '' %>" src="<%= meAvatar %>" alt="<%= player1.name %>"><% } %>
+      <div class="header-lp-name">
+        <span class="header-name <%= currentPlayer === player1 ? 'active-turn' : '' %>"><%= player1.name %></span>
+        <span class="header-lp" id="headerLpMe"><%= player1.lifePoints %></span>
+      </div>
     </div>
   </div>
 
@@ -794,7 +821,7 @@
                   <% const pv = previewAttrs(gameCard, false); %>
                   <div class="card opponent-spelltrap-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
-                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-image="<%= pv.image %>">
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
                   </div>
                 <% } %>
@@ -809,7 +836,7 @@
                   <% const pv = previewAttrs(gameCard, false); %>
                   <div class="card opponent-monster-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= gameCard.position %> <%= inBattlePhase && canAct ? 'attack-target' : '' %>"
                        data-instance-id="<%= gameCard.instanceId %>"
-                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
                   </div>
                 <% } %>
@@ -888,10 +915,10 @@
                        data-zone-index="<%= index %>"
                        data-can-reposition="<%= canReposition ? 'true' : 'false' %>"
                        data-can-attack="<%= canDeclareAttack ? 'true' : 'false' %>"
-                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
                     <% if (canUseIgnition) { %>
-                      <div class="effect-badge" data-action="monster-effect" data-instance-id="<%= gameCard.instanceId %>" data-needs-target="<%= ignition.needsTarget || '' %>" title="Activate Effect">⚡</div>
+                      <div class="effect-badge" data-action="monster-effect" data-instance-id="<%= gameCard.instanceId %>" data-needs-target="<%= ignition.needsTarget || '' %>" title="Activate Effect">FX</div>
                     <% } %>
                   </div>
                 <% } %>
@@ -921,7 +948,7 @@
                        data-instance-id="<%= gameCard.instanceId %>"
                        data-can-activate="<%= canActivateSet ? 'true' : 'false' %>"
                        data-needs-target="<%= stMeta ? (stMeta.needsTarget || '') : '' %>"
-                       data-name="<%= pv2.name %>" data-desc="<%= pv2.desc %>" data-image="<%= pv2.image %>">
+                       data-name="<%= pv2.name %>" data-desc="<%= pv2.desc %>" data-image="<%= pv2.image %>" data-image-cropped="<%= pv2.imageCropped %>">
                     <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" /><% } %>
                   </div>
                 <% } %>
@@ -939,7 +966,7 @@
 
       <% if (inBattlePhase && canAct && p2MonsterCount === 0) { %>
         <div style="text-align:center;">
-          <div class="direct-attack-zone" id="directAttackZone" style="display:inline-block;">DIRECT ATTACK ➔</div>
+          <div class="direct-attack-zone" id="directAttackZone" style="display:inline-block;">DIRECT ATTACK &gt;&gt;</div>
         </div>
       <% } %>
 
@@ -972,7 +999,7 @@
           <div class="card player-hand-card <%= frameClass(gameCard.card) %>"
                data-instance-id="<%= gameCard.instanceId %>"
                data-summonable="<%= showOverlay ? 'true' : 'false' %>"
-               data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>">
+               data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>" data-image-cropped="<%= pv3.imageCropped %>">
 
             <img src="<%= gameCard.card.image %>" />
 
@@ -1056,7 +1083,9 @@
         setTimeout(() => autoPhaseForm.submit(), 600);
       }
 
-      // Floating "-damage" number over whichever LP bar just got hit
+      // Floating "-damage" number over whichever LP bar just got hit,
+      // PLUS the big LP number in the header ticking down in real time
+      // rather than just snapping to the new value on page load.
       <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && lastBattleEvent.damage > 0 && lastBattleEvent.damagedPlayerIsPlayer1 !== null) { %>
         (function() {
           const targetId = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? "floatDamageMe" : "floatDamageOpp";
@@ -1064,6 +1093,27 @@
           if (el) {
             el.textContent = "-<%= lastBattleEvent.damage %>";
             requestAnimationFrame(() => el.classList.add("show"));
+          }
+
+          const headerId = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? "headerLpMe" : "headerLpOpp";
+          const headerEl = document.getElementById(headerId);
+          if (headerEl) {
+            const damage = <%= lastBattleEvent.damage %>;
+            const endLp = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? <%= player1.lifePoints %> : <%= player2.lifePoints %>;
+            const startLp = endLp + damage;
+            const durationMs = Math.min(1400, Math.max(500, damage / 4));
+            const startTime = performance.now();
+            headerEl.classList.add("lp-hit");
+            function tick(now) {
+              const t = Math.min(1, (now - startTime) / durationMs);
+              const eased = 1 - Math.pow(1 - t, 2);
+              const shown = Math.round(startLp - (startLp - endLp) * eased);
+              headerEl.textContent = shown;
+              if (t < 1) requestAnimationFrame(tick);
+              else headerEl.classList.remove("lp-hit");
+            }
+            headerEl.textContent = startLp;
+            requestAnimationFrame(tick);
           }
         })();
       <% } %>
@@ -1212,7 +1262,8 @@
         const atk = el.getAttribute("data-atk");
         const def = el.getAttribute("data-def");
         previewStats.textContent = (atk || def) ? ("ATK/" + (atk || "?") + "  DEF/" + (def || "?")) : "";
-        const img = el.getAttribute("data-image");
+        const croppedImg = el.getAttribute("data-image-cropped");
+        const img = croppedImg || el.getAttribute("data-image");
         if (img) {
           previewImage.src = img;
           previewImage.style.display = "block";
@@ -1429,7 +1480,7 @@
       const ownMonsterCards = document.querySelectorAll(".own-monster-card");
 
       // Ignition monster effects (Breaker, Obelisk, Rabid Horseman, ...):
-      // a small ⚡ badge in the corner, separate from the card's own click.
+      // a small badge in the corner, separate from the card's own click.
       document.querySelectorAll(".effect-badge").forEach(badge => {
         badge.addEventListener("click", (e) => {
           e.preventDefault();
@@ -1491,7 +1542,7 @@
               const name = card.getAttribute("data-name");
               const atk = card.getAttribute("data-atk");
               document.getElementById("targetPanelText").textContent =
-                "⚔ " + name + " (ATK " + atk + ") is ready — click a target monster" +
+                " " + name + " (ATK " + atk + ") is ready — click a target monster" +
                 (daz ? " or Direct Attack" : "") + ".";
               openTargetPanel("attack");
             }

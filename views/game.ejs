@@ -20,15 +20,8 @@
       align-items: flex-start;
     }
 
-    /* ============ LEFT: PHASE SIDEBAR ============ */
-    .phase-sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      width: 54px;
-      flex-shrink: 0;
-      padding-top: 60px;
-    }
+    /* ============ PHASE ICONS (rendered inside the horizontal
+       .phase-pill-bar on the field midline) ============ */
     .phase-icon {
       background: linear-gradient(180deg, #2a2110, #16130a);
       border: 2px solid #a9862f;
@@ -96,11 +89,12 @@
     .lp-bar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: center;
       background: linear-gradient(90deg, #16130a, #2a2210 60%, transparent);
       border: 1px solid #a9862f;
-      border-radius: 20px;
-      padding: 6px 18px;
+      border-radius: 10px;
+      padding: 3px 18px;
+      height: 10px;
       box-shadow: 0 0 10px rgba(212,175,55,0.25), inset 0 0 12px rgba(0,0,0,0.4);
     }
     .lp-bar { position: relative; overflow: hidden; }
@@ -112,7 +106,7 @@
       position: absolute; left: 0; top: 0; bottom: 0;
       background: linear-gradient(90deg, #1fae4a, #6fe08a);
       transition: width 0.6s ease-out;
-      opacity: 0.35;
+      opacity: 0.55;
     }
     .lp-gauge-fill.opp { background: linear-gradient(90deg, #6fe08a, #1fae4a); }
     .lp-bar .name, .lp-bar .lp-value, .lp-bar .arrow, .lp-bar .floating-damage { position: relative; z-index: 1; }
@@ -314,13 +308,51 @@
       padding: 9px 22px; border-radius: 20px; cursor: pointer; font-size: 13px; text-decoration: none;
     }
 
-    .surrender-btn {
-      display: block; width: 100%; background: linear-gradient(180deg, #4a1420, #2a0a10);
-      color: #ffb0b0; border: 1px solid #7a2030; font-weight: bold;
-      padding: 6px 4px; border-radius: 10px; cursor: pointer; font-size: 10px;
-      letter-spacing: 0.5px;
+    .top-header {
+      max-width: 1400px;
+      margin: 0 auto 8px auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0a0a0a;
+      border-bottom: 3px solid transparent;
+      border-image: linear-gradient(90deg, #ff4d4d, #4da3ff) 1;
+      padding: 8px 20px;
+      border-radius: 4px;
     }
-    .surrender-btn:hover { background: linear-gradient(180deg, #6a1c2a, #3a0e16); color: #ffd6d6; }
+    .top-header .header-side { display: flex; align-items: baseline; gap: 10px; }
+    .top-header .header-side.opp-side { flex-direction: row; }
+    .top-header .header-side.me-side { flex-direction: row-reverse; }
+    .top-header .header-lp { font-size: 26px; font-weight: bold; color: #ffe14d; font-family: 'Consolas', monospace; }
+    .top-header .header-name { font-size: 20px; color: #fff; font-weight: 500; }
+    .top-header .header-name.active-turn { color: #7fdfff; text-shadow: 0 0 8px rgba(127,223,255,0.8); }
+    .top-header .header-turn { text-align: center; }
+    .top-header .header-turn .turn-label { font-size: 12px; color: #aaa; letter-spacing: 2px; }
+    .top-header .header-turn .turn-num { font-size: 22px; font-weight: bold; color: #fff; }
+
+    /* ============ HORIZONTAL PHASE PILL (sits on the midline between
+       the two players' fields, like the reference layout) ============ */
+    .phase-pill-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 3px;
+      margin: 6px auto;
+      padding: 4px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 30px;
+      width: fit-content;
+    }
+    .phase-pill-bar .phase-icon {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+    .phase-pill-bar .phase-icon-btn { border-radius: 20px; }
+
+    /* Player's own deck: double-click to surrender (see JS below) */
+    #deckMe { cursor: pointer; }
+    #deckMe:hover { outline: 2px solid #ff8080; box-shadow: 0 0 10px rgba(255,80,80,0.6); }
 
     /* ---- Tag Force-style card frame coloring (applied to face-up cards
        only, so face-down Sets don't leak monster/spell subtype info) ---- */
@@ -333,12 +365,6 @@
     .card.frame-token     { box-shadow: 0 0 0 2px #999999 inset, 0 2px 6px rgba(0,0,0,0.6); }
     .card.frame-spell     { box-shadow: 0 0 0 2px #2ecc71 inset, 0 2px 6px rgba(0,0,0,0.6); }
     .card.frame-trap      { box-shadow: 0 0 0 2px #d94fa8 inset, 0 2px 6px rgba(0,0,0,0.6); }
-
-    .new-duel-btn {
-      display: inline-block; margin-top: 8px; background: linear-gradient(180deg, #ffcf40, #b8860b);
-      color: #241800; border: 1px solid #ffe9a8; font-weight: bold;
-      padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 12px; text-decoration: none;
-    }
 
     .slot {
       border: 2px dashed #2a4a6c;
@@ -635,9 +661,6 @@
       🏆 <%= winner.name %> WINS THE DUEL! 🏆
       <div>
         <a href="/game/start" class="restart-btn">🔄 RESTART DUEL</a>
-        <form action="/game/new-duel" method="POST" style="display:inline-block; margin-left:8px;">
-          <button type="submit" class="new-duel-btn">🎴 NEW DUEL</button>
-        </form>
       </div>
     </div>
   <% } %>
@@ -706,6 +729,21 @@
     </div>
   <% } %>
 
+  <div class="top-header">
+    <div class="header-side opp-side">
+      <span class="header-lp"><%= player2.lifePoints %></span>
+      <span class="header-name <%= currentPlayer === player2 ? 'active-turn' : '' %>"><%= player2.name %></span>
+    </div>
+    <div class="header-turn">
+      <div class="turn-label">TURN</div>
+      <div class="turn-num"><%= game.turn %></div>
+    </div>
+    <div class="header-side me-side">
+      <span class="header-name <%= currentPlayer === player1 ? 'active-turn' : '' %>"><%= player1.name %></span>
+      <span class="header-lp"><%= player1.lifePoints %></span>
+    </div>
+  </div>
+
   <div class="arena">
 
     <!-- LEFT: CARD PREVIEW PANEL -->
@@ -719,42 +757,12 @@
       <div class="preview-desc" id="previewDesc"></div>
     </div>
 
-    <!-- PHASE SIDEBAR: every phase is now a real visible step (including
-         Draw/Standby/End) — the current phase passes on click; any LATER
-         phase jumps straight there, skipping whatever's between (the AI
-         side of a turn always still visits every phase in between via
-         the exact same functions — this only changes what the human
-         chooses to click through). Blue = your turn, red = opponent's. -->
     <%
       const PHASE_ORDER = ['draw', 'standby', 'm1', 'battle', 'm2', 'end'];
       const curIdx = PHASE_ORDER.indexOf(phase);
       const turnActive = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
       const turnSideClass = isPlayer1Turn ? 'my-turn' : 'opp-turn';
     %>
-    <div class="phase-sidebar <%= turnSideClass %>">
-      <% [['draw','DP'], ['standby','SP'], ['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
-        <% const p = pair[0], label = pair[1]; const pIdx = PHASE_ORDER.indexOf(p); %>
-        <% const autoPass = (p === 'draw' || p === 'standby' || p === 'end'); %>
-        <% if (turnActive && phase === p) { %>
-          <form action="/game/next-phase" method="POST" style="margin:0;"<%- autoPass ? ' id="autoPhaseForm"' : '' %>>
-            <button type="submit" class="phase-icon active phase-icon-btn <%= turnSideClass %>" title="<%= autoPass ? 'Continues automatically' : 'Pass this phase' %>"><%= label %></button>
-          </form>
-        <% } else if (turnActive && pIdx > curIdx) { %>
-          <form action="/game/goto-phase" method="POST" style="margin:0;">
-            <input type="hidden" name="targetPhase" value="<%= p %>">
-            <button type="submit" class="phase-icon phase-icon-btn phase-icon-jump" title="Jump ahead to <%= label %>"><%= label %></button>
-          </form>
-        <% } else { %>
-          <div class="phase-icon <%= phase === p ? 'active' : '' %> <%= phase === p ? turnSideClass : '' %>"><%= label %></div>
-        <% } %>
-      <% }) %>
-
-      <% if (!(typeof gameOver !== 'undefined' && gameOver)) { %>
-      <form action="/game/surrender" method="POST" style="margin:8px 0 0 0;" id="surrenderForm">
-        <button type="submit" class="surrender-btn" title="Concede this Duel">🏳 SURRENDER</button>
-      </form>
-      <% } %>
-    </div>
 
     <!-- CENTER: FIELD -->
     <div class="field-wrap">
@@ -762,8 +770,6 @@
       <!-- OPPONENT LP -->
       <div class="lp-bar opp" id="lpBarOpp">
         <div class="lp-gauge-track"><div class="lp-gauge-fill opp" style="width: <%= Math.max(0, Math.min(100, player2.lifePoints / 8000 * 100)) %>%;"></div></div>
-        <span class="name"><%= player2.name %> <%= currentPlayer.name === player2.name ? '⚔' : '' %></span>
-        <span><span class="lp-value"><%= player2.lifePoints %></span><span class="arrow">▼</span></span>
         <span class="floating-damage" id="floatDamageOpp"></span>
       </div>
 
@@ -820,6 +826,32 @@
           </div>
           <div class="zone-label">GY (<%= player2.name %>)</div>
         </div>
+      </div>
+
+      <!-- HORIZONTAL PHASE PILL: sits on the midline between the two
+           fields. Every phase is a real visible step (including
+           Draw/Standby/End) — the current phase passes on click; any
+           LATER phase jumps straight there (the AI side of a turn
+           always still visits every phase in between via the exact
+           same functions — this only changes what the human clicks
+           through). Blue = your turn, red = opponent's. -->
+      <div class="phase-pill-bar <%= turnSideClass %>">
+        <% [['draw','DP'], ['standby','SP'], ['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
+          <% const p = pair[0], label = pair[1]; const pIdx = PHASE_ORDER.indexOf(p); %>
+          <% const autoPass = (p === 'draw' || p === 'standby' || p === 'end'); %>
+          <% if (turnActive && phase === p) { %>
+            <form action="/game/next-phase" method="POST" style="margin:0;"<%- autoPass ? ' id="autoPhaseForm"' : '' %>>
+              <button type="submit" class="phase-icon active phase-icon-btn <%= turnSideClass %>" title="<%= autoPass ? 'Continues automatically' : 'Pass this phase' %>"><%= label %></button>
+            </form>
+          <% } else if (turnActive && pIdx > curIdx) { %>
+            <form action="/game/goto-phase" method="POST" style="margin:0;">
+              <input type="hidden" name="targetPhase" value="<%= p %>">
+              <button type="submit" class="phase-icon phase-icon-btn phase-icon-jump" title="Jump ahead to <%= label %>"><%= label %></button>
+            </form>
+          <% } else { %>
+            <div class="phase-icon <%= phase === p ? 'active' : '' %> <%= phase === p ? turnSideClass : '' %>"><%= label %></div>
+          <% } %>
+        <% }) %>
       </div>
 
       <div class="field-mid">
@@ -969,8 +1001,6 @@
       <!-- PLAYER LP -->
       <div class="lp-bar me" id="lpBarMe">
         <div class="lp-gauge-track"><div class="lp-gauge-fill me" style="width: <%= Math.max(0, Math.min(100, player1.lifePoints / 8000 * 100)) %>%;"></div></div>
-        <span class="name"><%= player1.name %> <%= currentPlayer.name === player1.name ? '⚔' : '' %></span>
-        <span><span class="arrow">▲</span><span class="lp-value"><%= player1.lifePoints %></span></span>
         <span class="floating-damage" id="floatDamageMe"></span>
       </div>
 
@@ -1383,13 +1413,15 @@
       // OWN FIELD MONSTERS: tribute-pick / target-pick / reposition / select-attacker
       // ---------------------------------------------------
       // ---------------------------------------------------
-      // SURRENDER: confirm before conceding the duel
+      // SURRENDER: double-click your own Deck to concede (with confirm)
       // ---------------------------------------------------
-      const surrenderForm = document.getElementById("surrenderForm");
-      if (surrenderForm) {
-        surrenderForm.addEventListener("submit", (e) => {
-          if (!confirm("Surrender this Duel? Your opponent will be declared the winner.")) {
-            e.preventDefault();
+      const deckMeEl = document.getElementById("deckMe");
+      if (deckMeEl) {
+        deckMeEl.title = "Double-click to surrender the Duel";
+        deckMeEl.addEventListener("dblclick", (e) => {
+          e.preventDefault();
+          if (confirm("Surrender this Duel? Your opponent will be declared the winner.")) {
+            postForm("/game/surrender", {});
           }
         });
       }

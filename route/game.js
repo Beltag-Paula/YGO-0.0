@@ -465,27 +465,4 @@ router.post("/surrender", (req, res) => {
     res.redirect("/game");
 });
 
-// ---------------------------------------------------------
-// 15. NEW DUEL — restart with a fresh shuffled duel (alias of /start,
-// named to match the "surrender & start a new duel" flow).
-// ---------------------------------------------------------
-router.post("/new-duel", (req, res) => {
-    try {
-        const yugiDeck = require("../deck_inventory/yugi.json");
-        const kaibaDeck = require("../deck_inventory/kaiba.json");
-
-        const p1 = new Player("Yugi", yugiDeck);
-        const p2 = new Player("Kaiba", kaibaDeck);
-
-        humanPlayer = p1;
-        activeGameInstance = new MainGame(p1, p2);
-        activeGameInstance.startDuel();
-        advanceGame(activeGameInstance);
-
-        res.redirect("/game");
-    } catch (err) {
-        res.status(500).send(`CRITICAL ERROR: Failed to parse inventory JSON configurations or engine failed initialization: ${err.message}`);
-    }
-});
-
 module.exports = router;

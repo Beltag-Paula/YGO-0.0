@@ -19,8 +19,18 @@ class Player {
 
     const deck = buildDeckForPlayer(deckJson, this);
     this.zone.deck = deck.mainDeck;
+    // BUGFIX: GameCard's constructor always stamps location="deck" no
+    // matter which array it actually ends up in — that left every Extra
+    // Deck/Side Deck card lying about its own location from the moment
+    // the Player was created. Nothing crashed on it today only because
+    // no code path currently branches on an Extra/Side Deck card's
+    // .location, but it's exactly the kind of state a future effect (or
+    // the fuzz-test invariant checker) would trip over, so stamp the
+    // real zone now instead of leaving it implicit.
     this.zone.extraDeck = deck.extraDeck;
+    this.zone.extraDeck.forEach(gc => { gc.location = "extraDeck"; gc.zoneIndex = null; });
     this.zone.sideDeck = deck.sideDeck;
+    this.zone.sideDeck.forEach(gc => { gc.location = "sideDeck"; gc.zoneIndex = null; });
 
     this.normalSummonedThisTurn = false;
   }
@@ -130,6 +140,59 @@ class Player {
 
   // CRITICAL FIX: Encapsulated atomic transaction to ensure references remain clean
   moveCard(card, fromZone, toZone) {
+    // Union Monster protection (Y-Dragon Head, Z-Metal Tank, ...): a
+    // monster with an equipped Union card is destroyed IN ITS PLACE —
+    // the Union card goes to the Graveyard instead, the host stays on
+    // the field with its equip bonus removed. This is the single choke
+    // point every "destroy this monster" path already runs through
+    // (battle damage, card effects, tributes), so it protects against
+    // all of them uniformly rather than needing special-casing at each
+    // call site.
+    if (toZone === "graveyard" && fromZone === "monster" && card.equippedUnion) {
+      const unionCard = card.equippedUnion;
+      card.equippedUnion = null;
+      card.modifiers.atk -= (unionCard.unionAtkBoost || 0);
+      card.modifiers.def -= (unionCard.unionDefBoost || 0);
+      unionCard.unionAtkBoost = 0;
+      unionCard.unionDefBoost = 0;
+      // BUGFIX: this branch pushes unionCard straight into the Graveyard
+      // array itself rather than going through the rest of this method,
+      // so it needs the same "leaving the field" cleanup the general
+      // path below does — otherwise any modifiers the Union Monster
+      // picked up while it was still an independent field monster
+      // (before being equipped) stay stuck on it in the Graveyard, and
+      // would resurface if it's ever revived later.
+      unionCard.modifiers.atk = 0;
+      unionCard.modifiers.def = 0;
+      unionCard.modifiers.cannotAttack = false;
+      unionCard.modifiers.cannotChangePosition = false;
+      unionCard.modifiers.effectsNegated = false;
+      unionCard.modifiers.indestructible = false;
+      unionCard.hasSpellCounter = false;
+      unionCard.equippedTo = null;
+      unionCard.linkedTarget = null;
+      const gyZone = this.getZone("graveyard");
+      gyZone.push(unionCard);
+      unionCard.zoneIndex = null;
+      unionCard.location = "graveyard";
+      unionCard._arrivedFromField = true;
+      return; // the host itself never actually leaves the field
+    }
+
+    // Real rule: Tokens cease to exist the moment they'd leave the field
+    // — they never actually sit in the Graveyard/hand/deck as a card.
+    // BUGFIX: every destroy/discard/bounce path in this project funnels
+    // through this one method already (that's the whole point of it
+    // being the single choke point, same as the Union-monster guard
+    // above), so this is the one place that needs the check rather than
+    // every individual "moveCard(x, ..., 'graveyard')" call site.
+    if (card.isToken && toZone !== "monster") {
+      this.removeCard(card, fromZone);
+      card.location = "removed";
+      card.zoneIndex = null;
+      return;
+    }
+
     // Tracks whether a card arriving in the Graveyard came directly from
     // the field (battle, effect destruction, tribute) vs. elsewhere (hand
     // discard) — several monster effects ("if this card is sent from the
@@ -137,6 +200,36 @@ class Player {
     if (toZone === "graveyard") {
       card._arrivedFromField = (fromZone === "monster");
     }
+
+    // BUGFIX: a card actually leaving the field (not just moving between
+    // field zones) needs its live-play-only state wiped, or it can come
+    // back to haunt it — literally, if it's later revived by Monster
+    // Reborn/Call of the Haunted. Without this, a monster destroyed
+    // while shackled by Shadow Spell (-700 ATK/DEF, cannotAttack) or
+    // Fiendish Chain (effectsNegated) keeps those penalties forever on
+    // this same GameCard object, even once it's back on the field as a
+    // "fresh" summon. Equip/link bookkeeping on Spell/Trap cards is
+    // stale data past this point too.
+    const leavingField = (fromZone === "monster" || fromZone === "spellTrap") &&
+      toZone !== "monster" && toZone !== "spellTrap";
+    if (leavingField) {
+      // Fires whatever this Spell/Trap's own "when this card leaves the
+      // field..." rule requires (freeing the monster it was binding —
+      // Spellbinding Circle/Shadow Spell/Fiendish Chain — or destroying
+      // the monster it was reanimating — Call of the Haunted). See the
+      // matching handlers in Effects.js for what each one actually does.
+      if (card.linkedRevert) { card.linkedRevert(); card.linkedRevert = null; }
+      card.modifiers.atk = 0;
+      card.modifiers.def = 0;
+      card.modifiers.cannotAttack = false;
+      card.modifiers.cannotChangePosition = false;
+      card.modifiers.effectsNegated = false;
+      card.modifiers.indestructible = false;
+      card.hasSpellCounter = false;
+      card.equippedTo = null;
+      card.linkedTarget = null;
+    }
+
     this.removeCard(card, fromZone);
     this.addCard(card, toZone);
   }
@@ -157,6 +250,10 @@ class Player {
       gc.state.hasBeenSummonedThisTurn = false;
       gc.state.hasChangedPositionThisTurn = false;
       gc.state.hasUsedEffectThisTurn = false;
+      // A Union Monster (Y-Dragon Head, Z-Metal Tank, ...) currently
+      // equipped onto this card isn't itself sitting in zone.monster,
+      // so it needs its own turn-flag reset here too.
+      if (gc.equippedUnion) gc.equippedUnion.state.hasUsedEffectThisTurn = false;
     }
   }
 }

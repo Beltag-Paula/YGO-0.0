@@ -17,6 +17,37 @@ let humanPlayer = null; // whichever Player object the browser user controls (Yu
 function advanceGame(game) {
     if (!game || !humanPlayer) return;
 
+    // CROSS-REQUEST stagnation guard: the per-call guard further down
+    // only sees loop iterations INSIDE this one call, but a repeatedly
+    // FAILING "visible" AI action (canActivate said yes, the actual
+    // attempt didn't pan out, nothing about the game state changed)
+    // pauses and returns after every single attempt — so each retry is
+    // its own separate HTTP round-trip via the client's auto-continue
+    // timer, and a guard scoped to one call can never see the pattern.
+    // This one is persisted on the game instance itself so it survives
+    // across calls: if the very last duel-log line is identical to the
+    // last time this function ran, that's a strong "nothing actually
+    // happened last time either" signal regardless of the reason, and
+    // after a few repeats we force that window closed before doing
+    // anything else.
+    if (game.log.length > 0) {
+        const lastLine = game.log[game.log.length - 1];
+        if (lastLine === game._lastSeenLogLine) {
+            game._crossRequestStagnantCount = (game._crossRequestStagnantCount || 0) + 1;
+        } else {
+            game._crossRequestStagnantCount = 0;
+            game._lastSeenLogLine = lastLine;
+        }
+        if (game._crossRequestStagnantCount > 3) {
+            if (game.state.awaitingResponse) {
+                game.dispatch({ type: "PASS_RESPONSE" });
+            } else if (game.state.waitingForAction) {
+                game.dispatch({ type: "PASS" });
+            }
+            game._crossRequestStagnantCount = 0;
+        }
+    }
+
     // When an AI action ends the AI's turn (e.g. passing its End Phase),
     // the engine correctly swaps currentPlayer and resets phase to "draw"
     // — but that new phase hasn't actually been ENTERED yet (waitingForAction
@@ -43,11 +74,11 @@ function advanceGame(game) {
         // activation requirement it can't meet). Rather than spin for
         // the full 500-iteration budget doing nothing useful, force that
         // window closed so control returns to a real state.
-        const signature = `${game.currentPlayer.name}|${game.phase}|${game.currentPlayer.zone.hand.length}|${game.state.actedThisWindow}|${game.state.awaitingResponse}`;
+        const signature = `${game.currentPlayer.name}|${game.phase}|${game.currentPlayer.zone.hand.length}|${game.state.actedThisWindow}|${game.state.awaitingResponse}|${game.state.awaitingSummonResponse}`;
         if (signature === lastSignature) {
             stagnantCount++;
             if (stagnantCount > 20) {
-                if (game.state.awaitingResponse) {
+                if (game.state.awaitingResponse || game.state.awaitingSummonResponse) {
                     game.dispatch({ type: "PASS_RESPONSE" });
                 } else {
                     game.dispatch({ type: "PASS" });
@@ -64,6 +95,14 @@ function advanceGame(game) {
         try {
             if (game.state.awaitingResponse) {
                 if (game.battleResponse.defender === humanPlayer) return; // human must decide
+                const result = AIController.step(game);
+                if (!result.acted) return;
+                if (result.visible) pauseRequested = true;
+                continue;
+            }
+
+            if (game.state.awaitingSummonResponse) {
+                if (game.summonResponse.defender === humanPlayer) return; // human must decide
                 const result = AIController.step(game);
                 if (!result.acted) return;
                 if (result.visible) pauseRequested = true;
@@ -88,7 +127,7 @@ function advanceGame(game) {
             // take the whole server down. Log it, force the AI to give up
             // its current window, and keep the duel playable.
             console.error("advanceGame() caught an error, forcing a PASS to recover:", err);
-            if (game.state.awaitingResponse) {
+            if (game.state.awaitingResponse || game.state.awaitingSummonResponse) {
                 game.dispatch({ type: "PASS_RESPONSE" });
             } else if (game.state.waitingForAction) {
                 game.dispatch({ type: "PASS" });
@@ -138,9 +177,11 @@ router.get("/", (req, res) => {
     const battleEvent = activeGameInstance.lastBattleEvent;
     const drawEvent = activeGameInstance.lastDrawEvent;
     const discardEvent = activeGameInstance.lastDiscardEvent;
+    const revealEvent = activeGameInstance.lastRevealEvent;
     activeGameInstance.lastBattleEvent = null;
     activeGameInstance.lastDrawEvent = null;
     activeGameInstance.lastDiscardEvent = null;
+    activeGameInstance.lastRevealEvent = null;
 
     res.render("game", {
         player1: activeGameInstance.player1,
@@ -151,6 +192,7 @@ router.get("/", (req, res) => {
         waitingForAction: activeGameInstance.state.waitingForAction,
         actedThisWindow: activeGameInstance.state.actedThisWindow,
         awaitingResponse: activeGameInstance.state.awaitingResponse,
+        awaitingSummonResponse: activeGameInstance.state.awaitingSummonResponse,
         battleResponse: activeGameInstance.battleResponse,
         pendingAttack: activeGameInstance.pendingAttack,
         gameOver: activeGameInstance.gameOver,
@@ -160,6 +202,7 @@ router.get("/", (req, res) => {
         lastBattleEvent: battleEvent,
         lastDrawEvent: drawEvent,
         lastDiscardEvent: discardEvent,
+        lastRevealEvent: revealEvent,
         game: activeGameInstance
     });
 });
@@ -428,6 +471,25 @@ router.post("/activate-monster-effect", (req, res) => {
                 type: "ACTIVATE_MONSTER_EFFECT",
                 payload: { card: targetCard, targetInstanceId: targetInstanceId || null }
             });
+        }
+        advanceGame(activeGameInstance);
+    }
+    res.redirect("/game");
+});
+
+// ---------------------------------------------------------
+// 12b. UNEQUIP A UNION MONSTER (Y-Dragon Head, Z-Metal Tank, ...) —
+// pulls it off its host and Special Summons it back as its own monster.
+// ---------------------------------------------------------
+router.post("/unequip-union", (req, res) => {
+    const { hostInstanceId } = req.body;
+
+    if (activeGameInstance) {
+        const hostCard = activeGameInstance.currentPlayer.zone.monster.find(
+            gc => gc && gc.instanceId === hostInstanceId
+        );
+        if (hostCard) {
+            activeGameInstance.dispatch({ type: "UNEQUIP_UNION", payload: { host: hostCard } });
         }
         advanceGame(activeGameInstance);
     }

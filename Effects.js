@@ -28,8 +28,6 @@ const SPELL_TRAP_META = {
     "monster reborn": { kind: "spell", subtype: "normal", window: "main", needsTarget: "graveyardMonster" },
     "mystical space typhoon": { kind: "spell", subtype: "quickplay", window: "anytime", needsTarget: "spellTrap" },
     "premature burial": { kind: "spell", subtype: "equip", window: "main", needsTarget: "graveyardMonster", cost: { lp: 800 } },
-    "de-fusion": { kind: "spell", subtype: "quickplay", window: "anytime" },
-    "burst stream of destruction": { kind: "spell", subtype: "normal", window: "main" },
     "pot of greed": { kind: "spell", subtype: "normal", window: "main" },
     "dian keto the cure master": { kind: "spell", subtype: "normal", window: "main" },
     "fissure": { kind: "spell", subtype: "normal", window: "main" },
@@ -44,7 +42,7 @@ const SPELL_TRAP_META = {
     "book of secret arts": { kind: "spell", subtype: "equip", window: "main", needsTarget: "monster" },
     "shrink": { kind: "spell", subtype: "quickplay", window: "anytime", needsTarget: "monster" },
 
-    "trap hole": { kind: "trap", subtype: "normal", window: "anytime", needsTarget: "monster" },
+    "trap hole": { kind: "trap", subtype: "normal", window: "summon", needsTarget: "monster" },
     "mirror force": { kind: "trap", subtype: "normal", window: "response" },
     "negate attack": { kind: "trap", subtype: "normal", window: "response" },
     "magic cylinder": { kind: "trap", subtype: "normal", window: "response" },
@@ -59,6 +57,7 @@ const SPELL_TRAP_META = {
     "black luster ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" },
     "black magic ritual": { kind: "spell", subtype: "normal", window: "main", precheck: "ritual" },
     "burst stream of destruction": { kind: "spell", subtype: "normal", window: "main", precheck: "controlsBlueEyes" },
+    "ring of destruction": { kind: "trap", subtype: "normal", window: "anytime", needsTarget: "monster" },
 
     // --- Additional cards from the Yugi/Kaiba sample decks ---
     "dragon capture jar": { kind: "trap", subtype: "continuous", window: "anytime" },
@@ -98,6 +97,14 @@ function tempStatBoost(game, target, atkDelta, defDelta, label) {
     target.modifiers.atk += atkDelta;
     target.modifiers.def += defDelta;
     game.turnEffects.push(() => {
+        // BUGFIX: if `target` already left the Monster Zone before the
+        // End Phase (destroyed in battle, tributed, etc.), Player.moveCard
+        // already zeroed its modifiers out — subtracting this delta again
+        // here would push it negative and leak a phantom debuff onto
+        // whatever's now sitting in the Graveyard holding this same
+        // GameCard object. Only revert while it's still the live thing
+        // being boosted.
+        if (target.location !== "monster") return;
         target.modifiers.atk -= atkDelta;
         target.modifiers.def -= defDelta;
         game.addLog(`${label} on ${target.card.name} wears off.`);
@@ -107,6 +114,15 @@ function tempStatBoost(game, target, atkDelta, defDelta, label) {
 // Change of Heart / Brain Control: take control of a monster until the
 // End Phase, then automatically return it.
 function temporaryControl(game, gc, target) {
+    // BUGFIX: defensive guard matching the pattern used elsewhere in this
+    // file (e.g. Trap Hole, Soul Exchange) — if whatever resolved
+    // `target` handed back a card that isn't actually sitting in a
+    // Monster Zone right now (already moved by an earlier step of this
+    // same effect, or a stale reference), bail instead of crashing.
+    if (!target || target.location !== "monster") {
+        game.addLog(`${gc.card.name} has no valid monster to take control of and fizzles.`);
+        return;
+    }
     const newController = gc.owner;
     const originalOwner = target.owner;
     if (newController.getFreeMonsterSlot() === -1) {
@@ -194,13 +210,6 @@ const HANDLERS = {
 
     "black magic ritual": (game, gc) => {
         game.ritualSummon(gc.owner, gc);
-    },
-
-    "burst stream of destruction": (game, gc) => {
-        const opponent = gc.owner === game.player1 ? game.player2 : game.player1;
-        const mons = opponent.zone.monster.filter(m => m);
-        [...mons].forEach(m => opponent.moveCard(m, "monster", "graveyard"));
-        game.addLog(`Burst Stream of Destruction obliterates all of ${opponent.name}'s monsters!`);
     },
 
     "pot of greed": (game, gc) => {
@@ -329,7 +338,11 @@ const HANDLERS = {
     },
 
     "trap hole": (game, gc, target) => {
-        if (!target) return;
+        if (!target) { game.addLog(`Trap Hole has no valid target and fizzles.`); return; }
+        if (game.getAtk(target) < 1000) {
+            game.addLog(`Trap Hole cannot target ${target.card.name} (ATK below 1000) and fizzles.`);
+            return;
+        }
         const name = target.card.name;
         target.owner.moveCard(target, "monster", "graveyard");
         game.addLog(`Trap Hole swallows ${name}!`);
@@ -365,6 +378,18 @@ const HANDLERS = {
         target.modifiers.cannotAttack = true;
         target.modifiers.cannotChangePosition = true;
         gc.linkedTarget = target.instanceId;
+        // "When that monster is destroyed, destroy this card" is enforced
+        // generically by MainGame.cleanupOrphanedBinds (it leaves via
+        // linkedTarget going stale). The reverse — this card being
+        // destroyed first (MST, Heavy Storm, ...) — needs its own
+        // teardown so the monster doesn't stay bound forever; that's
+        // what linkedRevert is for, fired once by Player.moveCard the
+        // moment this card actually leaves the field.
+        gc.linkedRevert = () => {
+            if (target.location !== "monster") return; // already reset when IT left the field
+            target.modifiers.cannotAttack = false;
+            target.modifiers.cannotChangePosition = false;
+        };
         game.addLog(`Spellbinding Circle binds ${target.card.name} — it cannot attack or change position!`);
     },
 
@@ -375,6 +400,13 @@ const HANDLERS = {
         target.modifiers.cannotAttack = true;
         target.modifiers.cannotChangePosition = true;
         gc.linkedTarget = target.instanceId;
+        gc.linkedRevert = () => {
+            if (target.location !== "monster") return;
+            target.modifiers.atk += 700;
+            target.modifiers.def += 700;
+            target.modifiers.cannotAttack = false;
+            target.modifiers.cannotChangePosition = false;
+        };
         game.addLog(`Shadow Spell chains down ${target.card.name} (-700 ATK/DEF) — it cannot attack or change position!`);
     },
 
@@ -390,6 +422,15 @@ const HANDLERS = {
         target.position = "attack";
         target.state.hasBeenSummonedThisTurn = true;
         gc.linkedTarget = target.instanceId;
+        // "When this card leaves the field, destroy that monster" — the
+        // half of this card's text that was previously missing entirely.
+        gc.linkedRevert = () => {
+            if (target.location !== "monster") return;
+            const owner = target.owner;
+            const name = target.card.name;
+            owner.moveCard(target, "monster", "graveyard");
+            game.addLog(`${name} is destroyed — Call of the Haunted left the field.`);
+        };
         game.addLog(`Call of the Haunted Special Summons ${target.card.name} from the Graveyard!`);
     },
 
@@ -426,7 +467,16 @@ const HANDLERS = {
     },
 
     "enemy controller": (game, gc, target) => {
-        if (!target) return;
+        // BUGFIX: the real card only ever targets "1 face-up monster your
+        // OPPONENT controls" — this check was missing entirely, so
+        // targeting your own monster (nothing in SPELL_TRAP_META's
+        // generic needsTarget:"monster" stops that) would let the
+        // tribute step below remove the very card `target` still points
+        // at, then crash trying to move it a second time.
+        if (!target || target.owner === gc.owner) {
+            game.addLog("Enemy Controller must target a monster your opponent controls.");
+            return;
+        }
         const p = gc.owner;
         const ownMonsters = p.getMonstersOnField().filter(m => m.instanceId !== gc.instanceId);
         if (ownMonsters.length > 0) {
@@ -514,6 +564,12 @@ const HANDLERS = {
         target.modifiers.cannotChangePosition = true;
         target.modifiers.effectsNegated = true;
         gc.linkedTarget = target.instanceId;
+        gc.linkedRevert = () => {
+            if (target.location !== "monster") return;
+            target.modifiers.cannotAttack = false;
+            target.modifiers.cannotChangePosition = false;
+            target.modifiers.effectsNegated = false;
+        };
         game.addLog(`Fiendish Chain negates ${target.card.name}'s effect and seals its attack/position change!`);
     },
 
@@ -538,6 +594,19 @@ const HANDLERS = {
                 if (m.location === "monster") m.modifiers.cannotAttack = false;
             });
         });
+    },
+
+    "ring of destruction": (game, gc, target) => {
+        if (!target) { game.addLog("Ring of Destruction has no valid target and fizzles."); return; }
+        const atk = game.getAtk(target);
+        const name = target.card.name;
+        target.owner.moveCard(target, "monster", "graveyard");
+        game.addLog(`Ring of Destruction destroys ${name}!`);
+        if (atk > 0) {
+            game.player1.dealDamage(atk);
+            game.player2.dealDamage(atk);
+            game.addLog(`The explosion deals ${atk} damage to both players!`);
+        }
     }
 };
 
@@ -704,6 +773,50 @@ function triggerOnSummon(game, gc) {
 }
 
 // ------------------------------------------------------------------
+// UNION MONSTERS — data only (which cards, valid hosts, stat boost);
+// the actual equip/unequip/protection mechanic lives once in
+// MainGame.equipUnionMonster / unequipUnionMonster / Player.moveCard
+// so any future Union Monster just adds an entry here.
+// ------------------------------------------------------------------
+const UNION_MONSTERS = {
+    "y-dragon head": { hosts: ["x-head cannon"], atk: 400, def: 400 },
+    "z-metal tank": { hosts: ["x-head cannon", "y-dragon head"], atk: 600, def: 600 }
+};
+
+function getUnionInfo(cardName) {
+    return UNION_MONSTERS[normalize(cardName)] || null;
+}
+
+// A generic ignition definition shared by every Union Monster: target
+// one of your own valid, not-already-equipped hosts and attach to it.
+function unionIgnition(unionName) {
+    const info = UNION_MONSTERS[unionName];
+    const hasValidHost = (game, gc) =>
+        gc.owner.getMonstersOnField().some(m => !m.equippedUnion && info.hosts.includes(normalize(m.card.name)));
+    return {
+        needsTarget: "monster",
+        // Gating on "a valid host actually exists" (not just "haven't
+        // used this yet") matters for more than tidiness: it's what
+        // keeps the AI from ever choosing this as its action when it's
+        // impossible to complete — see AIController's ignition step,
+        // which only attempts activatable() ignitions in the first
+        // place. Without this check the AI would pick this, fail to
+        // find a same-side host, and retry forever.
+        canActivate: (game, gc) => !gc.state.hasUsedEffectThisTurn && hasValidHost(game, gc),
+        activate: (game, gc, target) => {
+            const validHost = target && target.owner === gc.owner && !target.equippedUnion &&
+                info.hosts.includes(normalize(target.card.name));
+            if (!validHost) {
+                game.addLog(`${gc.card.name} needs an unequipped "${info.hosts.join('" or "')}" you control to equip to.`);
+                return false;
+            }
+            game.equipUnionMonster(gc, target, info.atk, info.def);
+            return true;
+        }
+    };
+}
+
+// ------------------------------------------------------------------
 // IGNITION EFFECTS — monster effects the controller can manually
 // activate during their own Main Phase (once per turn per card, like
 // a Spell Speed 1 effect). Shown to the UI via getIgnition().
@@ -753,7 +866,9 @@ const IGNITION_EFFECTS = {
             game.addLog(`Obelisk the Tormentor Tributes 2 monsters, destroys every other monster on the field, and blasts ${opponent.name} for 4000 damage!`);
             return true;
         }
-    }
+    },
+    "y-dragon head": unionIgnition("y-dragon head"),
+    "z-metal tank": unionIgnition("z-metal tank")
 };
 
 function getIgnition(cardName) {
@@ -871,6 +986,7 @@ const GY_TRIGGER_EFFECTS = {
         const chosen = candidates[Math.floor(Math.random() * candidates.length)];
         owner.moveCard(chosen, "deck", "hand");
         owner.shuffleDeck();
+        game.revealSearchedCard(owner, chosen);
         game.addLog(`${gc.card.name}'s effect adds ${chosen.card.name} from the Deck to ${owner.name}'s hand!`);
     },
     "witch of the black forest": (game, gc) => {
@@ -883,6 +999,7 @@ const GY_TRIGGER_EFFECTS = {
         const chosen = candidates[Math.floor(Math.random() * candidates.length)];
         owner.moveCard(chosen, "deck", "hand");
         owner.shuffleDeck();
+        game.revealSearchedCard(owner, chosen);
         game.addLog(`${gc.card.name}'s effect adds ${chosen.card.name} from the Deck to ${owner.name}'s hand!`);
     }
 };
@@ -903,10 +1020,80 @@ function triggerFlip(game, gc) {
     handler(game, gc);
 }
 
+// ------------------------------------------------------------------
+// EFFECT INFO — a single, human-readable answer to "what does this
+// card actually DO in this engine, and how/when do I use it?" Pulled
+// together from every effect table above so the UI can show it on
+// every card (not just the ones currently activatable), rather than
+// leaving the person to guess why a card did or didn't do anything.
+// One card can genuinely have more than one entry (e.g. Breaker the
+// Magical Warrior has both an on-Summon trigger AND a separate
+// Ignition effect), so this returns an array plus a combined summary.
+// ------------------------------------------------------------------
+const SPELL_TRAP_WINDOW_NOTE = {
+    response: "activates only in response to an attack",
+    summon: "activates only in response to a Normal/Flip Summon",
+    anytime: "can be activated any time you have priority (Quick Effect)",
+    main: "activate during your own Main Phase"
+};
+const SPELL_TRAP_SUBTYPE_LABEL = {
+    normal: "Normal", quickplay: "Quick-Play", continuous: "Continuous",
+    equip: "Equip", counter: "Counter"
+};
+
+function getEffectInfo(cardName) {
+    const tags = [];
+    const meta = getMeta(cardName);
+    if (meta) {
+        const kindLabel = meta.kind === "spell" ? "Spell" : "Trap";
+        const subtypeLabel = SPELL_TRAP_SUBTYPE_LABEL[meta.subtype] || meta.subtype;
+        const windowNote = SPELL_TRAP_WINDOW_NOTE[meta.window] || "";
+        tags.push({ kind: "spelltrap", tag: (subtypeLabel || "").slice(0, 4).toUpperCase(),
+            label: `${subtypeLabel} ${kindLabel}${windowNote ? " — " + windowNote : ""}` });
+    }
+    if (getFlipEffect(cardName)) {
+        tags.push({ kind: "flip", tag: "FLIP", label: "FLIP Effect — triggers the instant this card turns face-up (attacked while Set, or manually flipped)" });
+    }
+    if (getUnionInfo(cardName)) {
+        tags.push({ kind: "union", tag: "UNION", label: "Union Monster — during your Main Phase, equip it onto a valid host for a stat boost; it's destroyed in the host's place" });
+    }
+    if (getIgnition(cardName)) {
+        tags.push({ kind: "ignition", tag: "IGN", label: "Ignition Effect — activate it yourself, once per turn, during your own Main Phase (look for the FX badge)" });
+    }
+    if (getOnSummon(cardName)) {
+        tags.push({ kind: "onsummon", tag: "SUM", label: "Triggers automatically the moment this card is Normal Summoned — no click needed" });
+    }
+    if (getHandResponseEffect(cardName)) {
+        tags.push({ kind: "handresponse", tag: "HAND", label: "Can be activated straight from your hand during a Battle Response Window (a hand trap)" });
+    }
+    if (DYNAMIC_STATS[normalize(cardName)]) {
+        tags.push({ kind: "dynamic", tag: "VAR", label: "This card's real ATK/DEF isn't the printed number — it's calculated live from the current board state" });
+    }
+    if (GY_TRIGGER_EFFECTS[normalize(cardName)]) {
+        tags.push({ kind: "gytrigger", tag: "GY", label: "Triggers automatically if this card is destroyed and sent from the field to the Graveyard" });
+    }
+    if (getFusionRecipe(cardName)) {
+        const recipe = getFusionRecipe(cardName);
+        tags.push({ kind: "fusion", tag: "FUSE", label: `Fusion Monster — Special Summoned by ${recipe.method === "banish" ? "banishing" : "fusing"} ${recipe.materials.join(" + ")}` });
+    }
+    const asRitualSpell = getRitualRecipe(cardName);
+    const asRitualMonster = Object.values(RITUAL_RECIPES).find(r => normalize(r.summons) === normalize(cardName));
+    if (asRitualSpell) {
+        tags.push({ kind: "ritual", tag: "RIT", label: `Ritual Spell — Tribute monsters totaling Level ${asRitualSpell.tributeLevel}+ from hand/field to Ritual Summon "${asRitualSpell.summons}"` });
+    } else if (asRitualMonster) {
+        tags.push({ kind: "ritual", tag: "RIT", label: "Ritual Monster — can only be Ritual Summoned with its matching Ritual Spell, never Normal Summoned" });
+    }
+    if (tags.length === 0) {
+        return { tags: [], summary: "No programmed effect yet — plays as a plain stat stick with no activatable ability." };
+    }
+    return { tags, summary: tags.map(t => t.label).join(" · ") };
+}
+
 module.exports = {
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,
     getHandResponseEffect, hasPiercing, cannotAttackDirectly,
-    forcedDefenseAfterAttack, hasChainAttackOnDestroy, isProtectedByLordOfD
+    forcedDefenseAfterAttack, hasChainAttackOnDestroy, isProtectedByLordOfD,
+    getUnionInfo, getEffectInfo
 };

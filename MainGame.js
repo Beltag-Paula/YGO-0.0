@@ -22,12 +22,16 @@ class MainGame {
         // before damage is calculated).
         this.pendingAttack = null;     // { attacker, target }
         this.battleResponse = null;    // { defender }
+        this.summonResponse = null;    // { defender, summonedGc } — a Trap Hole-style
+                                        // "when your opponent Normal/Flip Summons..."
+                                        // response window, parallel to battleResponse.
         this.attackNegated = false;
         this.forceEndBattlePhase = false;
         this.reflectDamage = 0;                 // Magic Cylinder-style reflected damage
         this.preventBattleDamageFor = null;     // Waboku: player who takes no battle damage this turn
         this.preventDestructionFor = null;      // Waboku: player whose monsters can't be destroyed by battle this turn
         this.lastBattleEvent = null;            // structured info for the UI: who attacked whom, for how much
+        this.lastRevealEvent = null;            // a Deck search effect (Sangan, ...) revealing the card it found
         this.lastDrawEvent = null;              // [{ playerIsPlayer1, count }, ...] — most recent draw(s), for animation
         this.lastDiscardEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent discard(s), for animation
         this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
@@ -36,7 +40,8 @@ class MainGame {
         this.state = {
             waitingForAction: false,
             actedThisWindow: false,
-            awaitingResponse: false
+            awaitingResponse: false,
+            awaitingSummonResponse: false
         };
     }
 
@@ -161,11 +166,23 @@ class MainGame {
         // act, and only by activating a Set card or passing.
         if (this.state.awaitingResponse) {
             if (action.type === "ACTIVATE_SET_CARD") {
-                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, true);
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, "battle");
             } else if (action.type === "ACTIVATE_HAND_CARD") {
                 this.activateHandResponseCard(action.payload.card);
             } else if (action.type === "PASS_RESPONSE") {
                 this.resolveBattleDamage();
+            }
+            return;
+        }
+
+        // While a Summon Response Window is open (Trap Hole-style "when
+        // your opponent Normal/Flip Summons..." traps), same idea: only
+        // the defender may act, only by activating a Set card or passing.
+        if (this.state.awaitingSummonResponse) {
+            if (action.type === "ACTIVATE_SET_CARD") {
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, "summon");
+            } else if (action.type === "PASS_RESPONSE") {
+                this.resolveSummonResponse();
             }
             return;
         }
@@ -194,8 +211,8 @@ class MainGame {
                 this.setSpellTrap(action.payload.card);
                 break;
             case "ACTIVATE_SET_CARD":
-                if (!inMainPhase) return; // response-window case handled above
-                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, false);
+                if (!inMainPhase) return; // response-window cases handled above
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, null);
                 break;
             case "ATTACK":
                 if (this.phase !== "battle") return;
@@ -204,6 +221,12 @@ class MainGame {
             case "ACTIVATE_MONSTER_EFFECT":
                 if (!inMainPhase) return;
                 this.activateMonsterEffect(action.payload.card, action.payload.targetInstanceId || null);
+                break;
+            case "UNEQUIP_UNION":
+                if (!inMainPhase) return;
+                if (action.payload.host && action.payload.host.owner === this.currentPlayer) {
+                    this.unequipUnionMonster(action.payload.host);
+                }
                 break;
             case "PASS":
                 this.endActionWindow();
@@ -268,6 +291,13 @@ class MainGame {
 
     getIgnitionMeta(cardName) {
         return Effects.getIgnition(cardName);
+    }
+
+    // What does this card actually DO, in plain language? Used by the UI
+    // to show effect-type badges and an explanation on every card, not
+    // just the ones with a currently-clickable action.
+    getEffectInfo(cardName) {
+        return Effects.getEffectInfo(cardName);
     }
 
     getRequiredTributes(level) {
@@ -362,6 +392,7 @@ class MainGame {
 
         this.addLog(`${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
         Effects.triggerOnSummon(this, gc);
+        this.checkSummonTrigger(gc);
         this.checkForWinner();
         return true;
     }
@@ -496,8 +527,12 @@ class MainGame {
         this.addLog(`${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
 
         // Flip Summon: a face-down monster turning face-up triggers its
-        // FLIP effect (if it has one programmed).
-        if (wasFaceDown) Effects.triggerFlip(this, gc);
+        // FLIP effect (if it has one programmed), and can also trigger
+        // an opponent's "when you Flip Summon..." trap (Trap Hole).
+        if (wasFaceDown) {
+            Effects.triggerFlip(this, gc);
+            this.checkSummonTrigger(gc);
+        }
 
         this.checkForWinner();
         return true;
@@ -541,6 +576,40 @@ class MainGame {
             if (meta.kind === "trap" && gc.turnSet === this.turn) return false;
             return meta.window === "response" || meta.window === "anytime";
         });
+    }
+
+    // Trap Hole-style "when your opponent Normal/Flip Summons a monster
+    // with (condition)..." traps — a parallel, narrower window to
+    // getEligibleResponses. Cards with window:"anytime" are freely
+    // activatable whenever their controller has priority (which
+    // includes this window too), same as they are for battle responses.
+    getEligibleSummonResponses(player) {
+        return player.getSpellTrapsOnField().filter(gc => {
+            if (gc.faceUp) return false;
+            const meta = Effects.getMeta(gc.card.name);
+            if (!meta) return false;
+            if (meta.kind === "trap" && gc.turnSet === this.turn) return false;
+            return meta.window === "summon" || meta.window === "anytime";
+        });
+    }
+
+    // Called right after a Normal Summon or (manual) Flip Summon
+    // completes. Opens a Summon Response Window for the opponent if they
+    // control anything that could react to it — mirrors declareAttack's
+    // battle response window, just for a different trigger.
+    checkSummonTrigger(summonedGc) {
+        if (this.gameOver || !summonedGc || summonedGc.location !== "monster") return;
+        const defender = summonedGc.owner === this.player1 ? this.player2 : this.player1;
+        const eligible = this.getEligibleSummonResponses(defender);
+        if (eligible.length === 0) return;
+        this.summonResponse = { defender, summonedGc };
+        this.state.awaitingSummonResponse = true;
+        this.addLog(`${defender.name} may activate a Set Spell/Trap Card in response to the Summon.`);
+    }
+
+    resolveSummonResponse() {
+        this.summonResponse = null;
+        this.state.awaitingSummonResponse = false;
     }
 
     declareAttack(attacker, target = null) {
@@ -748,6 +817,32 @@ class MainGame {
         });
     }
 
+    // BUGFIX: several continuous Traps (Spellbinding Circle, Shadow
+    // Spell, Fiendish Chain, Call of the Haunted) tie themselves to one
+    // specific monster and say, on the card itself, "When that monster
+    // is destroyed, destroy this card." None of that was previously
+    // enforced — the trap just sat in the Spell/Trap Zone forever,
+    // permanently occupying a zone slot for nothing once its target was
+    // long gone. This is the reverse of cleanupOrphanedEquips just
+    // above (that one frees an Equip Spell when ITS monster leaves; this
+    // one destroys these Traps under the same condition), and the
+    // opposite direction — the Trap itself leaving the field — is
+    // handled at the single choke point in Player.moveCard via
+    // card.linkedRevert(), set up by each of these cards' own handler
+    // in Effects.js.
+    cleanupOrphanedBinds() {
+        [this.player1, this.player2].forEach(owner => {
+            owner.getSpellTrapsOnField().forEach(gc => {
+                if (!gc.linkedTarget) return;
+                const target = this.findMonsterAnywhereOnField(gc.linkedTarget);
+                if (!target) {
+                    owner.moveCard(gc, "spellTrap", "graveyard");
+                    this.addLog(`${gc.card.name} is destroyed — its target left the field.`);
+                }
+            });
+        });
+    }
+
     // Scans for monsters that newly arrived in either Graveyard since the
     // last check, and fires "sent from the field to the GY" effects
     // (Sangan, Witch of the Black Forest, etc.) for the ones that
@@ -766,6 +861,7 @@ class MainGame {
 
     checkForWinner() {
         this.cleanupOrphanedEquips();
+        this.cleanupOrphanedBinds();
         this.processNewGraveyardArrivals();
         if (this.gameOver) return;
 
@@ -876,7 +972,18 @@ class MainGame {
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
 
-        if (meta.subtype === "normal" || meta.subtype === "quickplay") {
+        // BUGFIX: a targeted Spell/Trap CAN legally target itself (e.g.
+        // Mystical Space Typhoon targeting another face-up S/T is the
+        // common case, but nothing stops it from targeting itself — it's
+        // already face-up on the field by the time its own effect
+        // resolves). If the handler above already moved gc off the
+        // field as a side effect of resolving against itself, this
+        // second move-to-graveyard would try to remove a card that's no
+        // longer in the zone and crash Player.removeCard. Checking
+        // gc.location first makes this the same safe "only move it if
+        // it's still there" guard everywhere else in this file already
+        // uses before touching a zone.
+        if ((meta.subtype === "normal" || meta.subtype === "quickplay") && gc.location === "spellTrap") {
             p.moveCard(gc, "spellTrap", "graveyard");
         }
 
@@ -1024,6 +1131,67 @@ class MainGame {
         return player.getMonstersOnField().some(m => m.faceUp && Effects.normalize(m.card.name) === target);
     }
 
+    // Real tournament rules require a Deck search effect (Sangan, Witch
+    // of the Black Forest, ...) to reveal exactly which card it found to
+    // the opponent — this records that for the UI to show both players,
+    // not just log it as text. One-shot: route/game.js reads and clears
+    // it on the very next render, same as lastBattleEvent.
+    revealSearchedCard(player, gc) {
+        this.lastRevealEvent = {
+            playerName: player.name,
+            cardName: gc.card.name,
+            cardImage: gc.card.image,
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // UNION MONSTERS (Y-Dragon Head, Z-Metal Tank, ...) — a Union
+    // Monster can equip itself onto a valid host instead of staying an
+    // independent monster; while equipped it grants a stat boost and is
+    // destroyed in the host's place (see Player.moveCard). This is the
+    // generic mechanic; Effects.js supplies which cards/hosts/boosts.
+    // ------------------------------------------------------------------
+    equipUnionMonster(unionGc, hostGc, atkBoost, defBoost) {
+        const owner = unionGc.owner;
+        owner.removeCard(unionGc, "monster");
+        unionGc.location = "equipped";
+        unionGc.zoneIndex = null;
+        unionGc.unionAtkBoost = atkBoost;
+        unionGc.unionDefBoost = defBoost;
+        unionGc.state.hasUsedEffectThisTurn = true;
+        hostGc.equippedUnion = unionGc;
+        hostGc.modifiers.atk += atkBoost;
+        hostGc.modifiers.def += defBoost;
+        this.addLog(`${unionGc.card.name} equips onto ${hostGc.card.name} (+${atkBoost} ATK/+${defBoost} DEF)!`);
+    }
+
+    unequipUnionMonster(hostGc) {
+        const unionGc = hostGc.equippedUnion;
+        if (!unionGc) return false;
+        const owner = hostGc.owner;
+        if (unionGc.state.hasUsedEffectThisTurn) {
+            this.addLog(`${unionGc.card.name} has already used its effect this turn.`);
+            return false;
+        }
+        if (owner.getFreeMonsterSlot() === -1) {
+            this.addLog(`No free Monster Zone to Special Summon ${unionGc.card.name} back.`);
+            return false;
+        }
+        hostGc.equippedUnion = null;
+        hostGc.modifiers.atk -= (unionGc.unionAtkBoost || 0);
+        hostGc.modifiers.def -= (unionGc.unionDefBoost || 0);
+        unionGc.unionAtkBoost = 0;
+        unionGc.unionDefBoost = 0;
+        owner.addCard(unionGc, "monster");
+        unionGc.faceUp = true;
+        unionGc.position = "attack";
+        unionGc.state.hasBeenSummonedThisTurn = true;
+        unionGc.state.hasUsedEffectThisTurn = true;
+        this.addLog(`${unionGc.card.name} unequips from ${hostGc.card.name} and Special Summons itself!`);
+        this.checkForWinner();
+        return true;
+    }
+
     // Sets any Spell or Trap face-down in the Spell/Trap Zone.
     setSpellTrap(gc) {
         const p = this.currentPlayer;
@@ -1040,9 +1208,10 @@ class MainGame {
         return true;
     }
 
-    // Activates a face-down Spell/Trap already on the field. `isResponse`
-    // indicates this is happening inside a Battle Response Window.
-    activateSetCard(gc, targetInstanceId = null, isResponse = false) {
+    // Activates a face-down Spell/Trap already on the field. `mode`
+    // is null (owner's own Main Phase), "battle" (inside a Battle
+    // Response Window), or "summon" (inside a Summon Response Window).
+    activateSetCard(gc, targetInstanceId = null, mode = null) {
         if (!gc || gc.location !== "spellTrap") return false;
 
         const meta = Effects.getMeta(gc.card.name);
@@ -1053,14 +1222,21 @@ class MainGame {
 
         const owner = gc.owner;
 
-        if (isResponse) {
+        if (mode === "battle") {
             if (!this.battleResponse || owner !== this.battleResponse.defender) return false;
             if (meta.window !== "response" && meta.window !== "anytime") return false;
+        } else if (mode === "summon") {
+            if (!this.summonResponse || owner !== this.summonResponse.defender) return false;
+            if (meta.window !== "summon" && meta.window !== "anytime") return false;
         } else {
             if (owner !== this.currentPlayer) return false;
             if (this.phase !== "m1" && this.phase !== "m2") return false;
             if (meta.window === "response") {
                 this.addLog(`${gc.card.name} can only be activated in response to an attack.`);
+                return false;
+            }
+            if (meta.window === "summon") {
+                this.addLog(`${gc.card.name} can only be activated in response to a Normal or Flip Summon.`);
                 return false;
             }
         }
@@ -1089,7 +1265,9 @@ class MainGame {
             }
         }
 
-        const target = this.resolveTarget(meta, targetInstanceId);
+        const target = (mode === "summon" && meta.window === "summon")
+            ? (this.summonResponse ? this.summonResponse.summonedGc : null)  // Trap Hole-style: implicit target is the monster that triggered this window, never player-chosen
+            : this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
             this.addLog(`${gc.card.name} has no valid target and cannot be activated.`);
             return false;
@@ -1112,12 +1290,18 @@ class MainGame {
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
 
-        if (meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") {
+        // BUGFIX: same self-target guard as activateSpellFromHand above —
+        // e.g. Mystical Space Typhoon Set face-down, then activated
+        // targeting itself, would otherwise crash trying to move itself
+        // to the Graveyard twice.
+        if ((meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") && gc.location === "spellTrap") {
             owner.moveCard(gc, "spellTrap", "graveyard");
         }
 
-        if (isResponse) {
+        if (mode === "battle") {
             this.resolveBattleDamage();
+        } else if (mode === "summon") {
+            this.resolveSummonResponse();
         }
 
         this.checkForWinner();

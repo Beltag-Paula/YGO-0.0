@@ -25,6 +25,15 @@ const Effects = require("./Effects.js");
 // summoned? Compares its real (dynamic-stat-aware) ATK/DEF against the
 // strongest thing already on the opponent's field.
 function decideSummonPosition(game, gc) {
+    // Flip-effect monsters (Cyber Jar, Morphing Jar, Man-Eater Bug, Trap
+    // Master, ...) are worth almost nothing Normal Summoned face-up —
+    // the whole point of the card is the FLIP trigger, which only fires
+    // going from face-down to face-up. A competent player virtually
+    // always Sets these instead, either flipping them for value later
+    // or letting an attacker force the flip. Stat comparisons below
+    // don't even get a vote here.
+    if (Effects.getFlipEffect(gc.card.name)) return "defense";
+
     const opponent = game.opponentPlayer;
     const oppMonsters = opponent.getMonstersOnField();
     if (oppMonsters.length === 0) return "attack"; // nothing to worry about — go aggressive
@@ -86,8 +95,16 @@ function actMainPhase(game) {
     });
     if (ignitionMonster) {
         const ign = Effects.getIgnition(ignitionMonster.card.name);
+        const unionInfo = Effects.getUnionInfo(ignitionMonster.card.name);
         let targetInstanceId = null;
-        if (ign.needsTarget === "spellTrap") {
+        if (unionInfo) {
+            // Union Monster equips: the target must be a valid host on the
+            // SAME side of the field, never the opponent's monster — the
+            // generic "grab the enemy's best monster" heuristic below is
+            // wrong here and would just fail forever.
+            const host = p.getMonstersOnField().find(m => !m.equippedUnion && unionInfo.hosts.includes(Effects.normalize(m.card.name)));
+            targetInstanceId = host ? host.instanceId : null;
+        } else if (ign.needsTarget === "spellTrap") {
             const enemy = p === game.player1 ? game.player2 : game.player1;
             const st = enemy.getSpellTrapsOnField()[0];
             targetInstanceId = st ? st.instanceId : null;
@@ -165,10 +182,25 @@ function actBattlePhase(game) {
     const defenders = opponent.getMonstersOnField();
 
     if (defenders.length === 0) {
-        // No blockers — a direct attack is always safe. Lead with the
-        // biggest hitter, prioritizing lethal if it's on the table.
-        const lethal = attackers.find(a => game.getAtk(a) >= opponent.lifePoints);
-        const chosen = lethal || attackers.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
+        // No blockers — a direct attack is always safe... for anything
+        // that's actually allowed to declare one. BUGFIX: a monster like
+        // Spear Dragon can't declare a direct attack at all (Effects.
+        // cannotAttackDirectly); declareAttack correctly rejects that
+        // and leaves the game state untouched, but the old code here
+        // didn't filter such monsters out before picking its "biggest
+        // hitter" — so if that happened to be the only attacker (or the
+        // strongest one), the AI would call PASS-free advanceGame() into
+        // dispatching the exact same doomed attack every single step,
+        // forever, same "don't pick a move that can't work" pitfall the
+        // ignition-effect and battle-response code elsewhere in this
+        // file already guards against.
+        const directCapable = attackers.filter(a => !Effects.cannotAttackDirectly(a.card.name));
+        if (directCapable.length === 0) {
+            game.dispatch({ type: "PASS" });
+            return { acted: true, visible: false };
+        }
+        const lethal = directCapable.find(a => game.getAtk(a) >= opponent.lifePoints);
+        const chosen = lethal || directCapable.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
         game.dispatch({ type: "ATTACK", payload: { attacker: chosen, target: null } });
         return { acted: true, visible: true };
     }
@@ -268,12 +300,81 @@ function actBattleResponse(game) {
  * { acted, visible } — see file header. { acted: false } means there
  * was nothing for the AI to do right now (not its window).
  */
+// Called when the AI is the DEFENDER during a Summon Response Window
+// (Trap Hole-style "when your opponent Normal/Flip Summons..." traps).
+// Mirrors actBattleResponse, but the target is always the monster that
+// was just summoned — never a choice.
+function actSummonResponse(game) {
+    const defender = game.summonResponse.defender;
+    const summonedGc = game.summonResponse.summonedGc;
+
+    const eligible = game.getEligibleSummonResponses(defender).filter(gc => {
+        const meta = Effects.getMeta(gc.card.name);
+        if (meta.cost?.tributeMinAtk) {
+            return defender.getMonstersOnField().some(m => game.getAtk(m) >= meta.cost.tributeMinAtk);
+        }
+        if (meta.cost?.lp) {
+            return defender.lifePoints > meta.cost.lp;
+        }
+        // Trap Hole only actually does anything against a 1000+ ATK
+        // target — skip it otherwise rather than waste the card for
+        // nothing (same "don't pick a move that can't work" principle
+        // as the cost checks above).
+        if (Effects.normalize(gc.card.name) === "trap hole") {
+            return game.getAtk(summonedGc) >= 1000;
+        }
+        return true;
+    });
+
+    const priority = eligible[0];
+
+    if (!priority) {
+        game.dispatch({ type: "PASS_RESPONSE" });
+        return { acted: true, visible: false };
+    }
+
+    const meta = Effects.getMeta(priority.card.name);
+    let targetInstanceId = null;
+
+    if (meta.window === "summon") {
+        // Trap Hole-style: the implicit target IS the monster that
+        // triggered this window — never a separate choice.
+        targetInstanceId = summonedGc.instanceId;
+    } else if (meta.needsTarget === "monster") {
+        // An "anytime" trap (Spellbinding Circle, Shadow Spell, ...)
+        // being used in this window instead of its usual one — still
+        // needs its own real target, most naturally the monster that
+        // was just summoned if that's a legal target for it.
+        targetInstanceId = summonedGc.instanceId;
+    } else if (meta.needsTarget === "graveyardMonster") {
+        const gyMon = defender.zone.graveyard.find(m => game.isMonster(m));
+        targetInstanceId = gyMon ? gyMon.instanceId : null;
+    } else if (meta.needsTarget === "spellTrap") {
+        const enemy = defender === game.player1 ? game.player2 : game.player1;
+        const stCard = enemy.getSpellTrapsOnField()[0];
+        targetInstanceId = stCard ? stCard.instanceId : null;
+    }
+
+    if (meta.needsTarget && !targetInstanceId) {
+        game.dispatch({ type: "PASS_RESPONSE" });
+        return { acted: true, visible: false };
+    }
+
+    game.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card: priority, targetInstanceId } });
+    return { acted: true, visible: true };
+}
+
 function step(game) {
     if (game.gameOver) return { acted: false, visible: false };
 
     if (game.state.awaitingResponse) {
         if (game.battleResponse.defender === game.currentPlayer) return { acted: false, visible: false };
         return actBattleResponse(game);
+    }
+
+    if (game.state.awaitingSummonResponse) {
+        if (game.summonResponse.defender === game.currentPlayer) return { acted: false, visible: false };
+        return actSummonResponse(game);
     }
 
     if (!game.state.waitingForAction) return { acted: false, visible: false };

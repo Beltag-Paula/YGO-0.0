@@ -56,8 +56,21 @@ function actMainPhase(game) {
     if (!game.state.actedThisWindow) {
         const summonable = p.zone.hand.filter(gc => game.canNormalSummon(gc));
         if (summonable.length > 0) {
+            // BUGFIX: must use getRequiredTributesForSummon here, not the
+            // raw getRequiredTributes(level) — the former folds in Cost
+            // Down's "-2 Levels this turn" and Soul Exchange's pre-paid
+            // credits, which is exactly what normalSummon()/setMonster()
+            // themselves check before accepting a summon. Using the raw,
+            // unadjusted level here can compute a DIFFERENT tribute count
+            // than what the engine actually requires (e.g. Cost Down
+            // turns a Level 8 needing 2 Tributes into a Level 6 needing
+            // only 1) — the mismatched tributeIndices.length then gets
+            // silently rejected by normalSummon(), and because dispatch()'s
+            // return value was never checked, the AI just kept reporting
+            // "acted: true" and retrying the exact same doomed summon
+            // forever every time this function was called again.
             const free = summonable
-                .filter(gc => game.getRequiredTributes(gc.card.level) === 0)
+                .filter(gc => game.getRequiredTributesForSummon(p, gc).required === 0)
                 .sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
 
             if (free) {
@@ -71,7 +84,7 @@ function actMainPhase(game) {
             }
 
             const big = summonable.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
-            const required = game.getRequiredTributes(big.card.level);
+            const required = game.getRequiredTributesForSummon(p, big).required;
             const occupied = p.zone.monster.map((s, i) => (s ? i : null)).filter(v => v !== null);
 
             if (occupied.length >= required) {
@@ -117,6 +130,23 @@ function actMainPhase(game) {
             game.dispatch({ type: "ACTIVATE_MONSTER_EFFECT", payload: { card: ignitionMonster, targetInstanceId } });
             return { acted: true, visible: true };
         }
+    }
+
+    // 1c) Cards like Spear Dragon get FORCED into Defense Position after
+    // they attack — but that's a one-turn side effect, not a strategic
+    // choice to sit back. On a later turn there's nothing stopping them
+    // from freely switching back to Attack Position (same rules as any
+    // other monster: once per turn, hasn't attacked/been Summoned this
+    // turn yet) — so unlike a monster genuinely walling for its DEF
+    // stat, there's no reason for the AI to leave it sitting there.
+    const strandedAttacker = p.getMonstersOnField().find(gc =>
+        gc.faceUp && gc.position === "defense" &&
+        Effects.forcedDefenseAfterAttack(gc.card.name) &&
+        game.canChangePosition(gc)
+    );
+    if (strandedAttacker) {
+        game.dispatch({ type: "CHANGE_POSITION", payload: { card: strandedAttacker } });
+        return { acted: true, visible: true };
     }
 
     // 2) Opportunistically set a Trap/Continuous Spell from hand if there's room.

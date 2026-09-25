@@ -133,6 +133,18 @@ function temporaryControl(game, gc, target) {
     target.faceUp = true;
     game.turnEffects.push(() => {
         if (target.location === "monster" && newController.getMonstersOnField().includes(target)) {
+            // BUGFIX: the original owner's Monster Zone can fill up
+            // between now and the End Phase (they can still Normal
+            // Summon, Special Summon, etc. while this card is out of
+            // their control) — transferCard would throw trying to add it
+            // to a zone with no free slot. Real-rules-adjacent fallback:
+            // if there's genuinely nowhere for it to go back to, it just
+            // stays where it is under the current controller rather than
+            // crashing the duel.
+            if (originalOwner.getFreeMonsterSlot() === -1) {
+                game.addLog(`${originalOwner.name} has no free Monster Zone — ${target.card.name} stays under ${newController.name}'s control.`);
+                return;
+            }
             game.transferCard(target, newController, "monster", originalOwner, "monster");
             game.addLog(`${target.card.name} returns to ${originalOwner.name}'s control.`);
         }
@@ -1017,6 +1029,7 @@ function getFlipEffect(cardName) {
 function triggerFlip(game, gc) {
     const handler = FLIP_EFFECTS[normalize(gc.card.name)];
     if (!handler) return;
+    game.recordFieldEvent("flip", gc);
     handler(game, gc);
 }
 

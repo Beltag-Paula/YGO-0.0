@@ -219,9 +219,106 @@
       animation: cardAppear 0.35s ease-out;
     }
     @keyframes cardAppear {
-      from { opacity: 0; transform: scale(0.85) translateY(6px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
+      from { opacity: 0; transform: rotate(var(--rot)) scale(0.85) translateY(6px); }
+      to { opacity: 1; transform: rotate(var(--rot)) scale(1) translateY(0); }
     }
+
+    /* ------------------------------------------------------------
+       FIELD EVENTS — a card actually landing on the field just now
+       (Summon, Set, Ritual/Tribute Summon, a Spell/Trap activating,
+       a Flip effect firing), as opposed to the generic settle-in
+       above that plays for every card on every re-render. Applied
+       as a one-shot class straight onto the specific card element by
+       instanceId (see playFieldEvent in the script below), so only
+       the card that just did something gets the dramatic treatment.
+       Every frame folds in rotate(var(--rot)) first — the card's
+       correct Attack/Defense orientation from the .defense rule
+       above — since a CSS animation replaces the whole `transform`
+       value for its duration; leaving that out is exactly what caused
+       Defense Position (and Set) monsters to flash upright mid-animation.
+       ------------------------------------------------------------ */
+    .card.fx-land-summon { animation: fxSummonPop 0.7s cubic-bezier(.2,1.6,.4,1) both; z-index: 20; }
+    @keyframes fxSummonPop {
+      0%   { transform: rotate(var(--rot)) scale(0.4) translateY(14px); filter: brightness(2.6) saturate(0.4); box-shadow: 0 0 0 rgba(255,214,90,0); }
+      45%  { transform: rotate(var(--rot)) scale(1.16); filter: brightness(1.7); box-shadow: 0 0 34px 10px rgba(255,214,90,0.85); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-set { animation: fxSetSlam 0.5s ease-out both; z-index: 20; }
+    @keyframes fxSetSlam {
+      0%   { transform: rotate(var(--rot)) scale(0.6); filter: brightness(2.2); box-shadow: 0 0 0 rgba(120,180,255,0); }
+      55%  { transform: rotate(var(--rot)) scale(1.08); filter: brightness(1.5); box-shadow: 0 0 22px 6px rgba(120,180,255,0.75); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-ritual { animation: fxRitualBurst 1.3s cubic-bezier(.2,1.5,.4,1) both; z-index: 25; }
+    @keyframes fxRitualBurst {
+      0%   { transform: rotate(var(--rot)) scale(0.3); filter: brightness(3) hue-rotate(0deg) saturate(0.3); box-shadow: 0 0 0 rgba(190,130,255,0); }
+      35%  { transform: rotate(var(--rot)) scale(1.28); filter: brightness(2.1) hue-rotate(20deg); box-shadow: 0 0 50px 16px rgba(190,130,255,0.95); }
+      55%  { transform: rotate(var(--rot)) scale(0.94); filter: brightness(1.6); box-shadow: 0 0 38px 12px rgba(120,150,255,0.85); }
+      75%  { transform: rotate(var(--rot)) scale(1.08); filter: brightness(1.3); box-shadow: 0 0 26px 8px rgba(190,130,255,0.7); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-spell { animation: fxSpellFlash 0.8s ease-out both; z-index: 20; }
+    @keyframes fxSpellFlash {
+      0%   { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 0 0 rgba(70,220,120,0); }
+      30%  { transform: rotate(var(--rot)); filter: brightness(2) saturate(1.4); box-shadow: 0 0 28px 8px rgba(70,220,120,0.9); }
+      100% { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-trap { animation: fxTrapFlash 0.8s ease-out both; z-index: 20; }
+    @keyframes fxTrapFlash {
+      0%   { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 0 0 rgba(230,70,190,0); }
+      30%  { transform: rotate(var(--rot)); filter: brightness(2) saturate(1.4); box-shadow: 0 0 28px 8px rgba(230,70,190,0.9); }
+      100% { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    /* Vanishes the card in place once its activation flash finishes —
+       used for non-Continuous Spells/Traps right before they're sent to
+       the Graveyard, so the card doesn't just abruptly disappear when
+       the page re-renders without it. */
+    .card.fx-to-graveyard { animation: fxToGraveyard 0.45s ease-in both; z-index: 20; }
+    @keyframes fxToGraveyard {
+      0%   { transform: rotate(var(--rot)) scale(1); opacity: 1; }
+      100% { transform: rotate(var(--rot)) scale(0.25) translateY(30px); opacity: 0; }
+    }
+
+    .card.fx-land-flip { animation: fxFlipReveal 0.7s ease-in-out both; z-index: 20; }
+    @keyframes fxFlipReveal {
+      0%   { transform: rotate(var(--rot)) rotateY(0deg); filter: brightness(1); }
+      45%  { transform: rotate(var(--rot)) rotateY(90deg); filter: brightness(0.4); }
+      50%  { transform: rotate(var(--rot)) rotateY(90deg); filter: brightness(2.2); box-shadow: 0 0 30px 8px rgba(90,210,255,0.9); }
+      100% { transform: rotate(var(--rot)) rotateY(0deg) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    /* The big centered callout banner — "NORMAL SUMMON!", "RITUAL
+       SUMMON!", "SPELL CARD ACTIVATE!", etc. — Master Duel/Tag
+       Force-style, distinct per event kind. Hidden by default; JS
+       toggles the "show" class for its brief window on-screen. */
+    .field-event-toast {
+      position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%) scale(0.7);
+      z-index: 400; text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity 0.25s, transform 0.25s;
+    }
+    .field-event-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    .field-event-toast .fe-text {
+      font-family: 'Orbitron', 'Consolas', monospace;
+      font-size: 30px; font-weight: 800; letter-spacing: 2px;
+      color: #fff; padding: 8px 28px; border-radius: 6px;
+      text-shadow: 0 0 14px currentColor, 0 2px 4px rgba(0,0,0,0.9);
+      white-space: nowrap;
+    }
+    .field-event-toast .fe-sub {
+      margin-top: 4px; font-size: 14px; color: #dbe9ff;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.9); white-space: nowrap;
+    }
+    .field-event-toast.fe-summon .fe-text { color: #ffd65a; }
+    .field-event-toast.fe-set .fe-text { color: #78b4ff; }
+    .field-event-toast.fe-ritual .fe-text { font-size: 34px; color: #d9a8ff; }
+    .field-event-toast.fe-spell .fe-text { color: #66e07f; }
+    .field-event-toast.fe-trap .fe-text { color: #e878c8; }
+    .field-event-toast.fe-flip .fe-text { color: #5ad2ff; }
 
     /* Flying card used for draw/discard animations (Pot of Greed, Card
        Destruction, etc.) — a fixed-position element that gets its actual
@@ -293,6 +390,17 @@
       font-size: 10px;
       color: #7fb3e0;
       text-align: center;
+    }
+    /* A one-shot Spell/Trap is already gone from the field by the time
+       the page re-renders (it moved to the Graveyard server-side, same
+       request, right after its effect resolved) — this pulses the
+       Graveyard icon itself as the "it just landed here" cue, since
+       there's no card element left on the board to animate. */
+    .zone-counter.gy-pulse { animation: gyPulse 0.9s ease-out; }
+    @keyframes gyPulse {
+      0%   { box-shadow: 0 0 0 rgba(180,100,220,0); border-color: #2a5a8c; }
+      30%  { box-shadow: 0 0 22px 8px rgba(180,100,220,0.85); border-color: #c88bff; }
+      100% { box-shadow: 0 0 0 rgba(180,100,220,0); border-color: #2a5a8c; }
     }
     .zone-counter .count {
       position: absolute;
@@ -461,16 +569,27 @@
       box-shadow: 0 4px 8px rgba(0,0,0,0.5);
       background-size: cover;
       position: relative;
+      /* Real rule: a face-up Defense Position monster (and a Set monster,
+         which defaults to Defense) is rendered sideways — only face-up
+         Attack Position is upright. --rot holds that per-card rotation as
+         a variable, rather than a hardcoded transform, specifically so
+         every animation below can fold it in (rotate(var(--rot)) ...)
+         instead of overwriting it. CSS animations replace the whole
+         `transform` value for their duration, so any keyframe that didn't
+         include the current rotation would otherwise flash the card
+         upright for the length of that animation — every phase change,
+         since cardAppear below runs on every single re-render. */
+      --rot: 0deg;
+      transform: rotate(var(--rot));
       transition: transform 0.15s, box-shadow 0.15s, outline 0.15s;
       cursor: pointer;
       user-select: none;
     }
-    .card.defense { transform: rotate(90deg); }
+    .card.defense { --rot: 90deg; }
     .card img { width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
     .card.face-down { background: linear-gradient(135deg, #8b0000 0%, #4a0000 100%); border: 2px solid #ffcc00; }
     .card.face-down img { display: none; }
-    .card:hover { transform: translateY(-4px) scale(1.04); z-index: 5; }
-    .card.defense:hover { transform: rotate(90deg) translateY(-4px) scale(1.04); }
+    .card:hover { transform: rotate(var(--rot)) translateY(-4px) scale(1.04); z-index: 5; }
 
     .card.selected { outline: 3px solid #ffcc00; box-shadow: 0 0 15px #ffcc00; }
     .summon-btn {
@@ -829,7 +948,11 @@
               <div class="response-option-card hand-response-card"
                    data-instance-id="<%= gc.instanceId %>"
                    data-hand-response="true"
+<<<<<<< HEAD
                    data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>">
+=======
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+>>>>>>> bac8aac (16th)
                 <img src="<%= gc.card.image %>" />
                 <div class="rname">Discard <%= gc.card.name %></div>
               </div>
@@ -912,6 +1035,16 @@
     </div>
   <% } %>
 
+<<<<<<< HEAD
+=======
+  <!-- Summon/Set/Ritual/Spell/Trap/Flip callout banner — populated and
+       shown by playFieldEvent() in the script below, from lastFieldEvent. -->
+  <div class="field-event-toast" id="fieldEventToast">
+    <div class="fe-text" id="fieldEventText"></div>
+    <div class="fe-sub" id="fieldEventSub"></div>
+  </div>
+
+>>>>>>> bac8aac (16th)
   <%
     function avatarFor(name) {
       if (/kaiba/i.test(name)) return '/images/Kaiba-MDDG.png';
@@ -983,11 +1116,10 @@
 
       <div class="field-mid">
         <div class="side-col">
-          <div class="zone-counter" id="deckOpp" data-name="Deck" data-desc="<%= player2.zone.deck.length %> cards remaining.">
-            🂠<div class="count"><%= player2.zone.deck.length %></div>
-          </div>
-          <div class="zone-label">DECK</div>
-          <div class="zone-counter" data-name="Extra Deck" data-desc="<%= player2.zone.extraDeck.length %> cards.">EX<div class="count"><%= player2.zone.extraDeck.length %></div></div>
+          <div class="zone-counter" data-name="Field Spell Zone" data-desc="No Field Spell active.">FIELD</div>
+          <div class="zone-label">FIELD</div>
+          <div class="zone-counter" data-name="Extra Deck" data-desc="<%= player2.zone.extraDeck.length %> cards. Hidden — only <%= player2.name %> can look through their own Extra Deck.">EX<div class="count"><%= player2.zone.extraDeck.length %></div></div>
+          <div class="zone-label">EXTRA (<%= player2.name %>)</div>
         </div>
 
         <div class="field-center">
@@ -1027,12 +1159,26 @@
         </div>
 
         <div class="side-col">
+          <div class="zone-counter gy-clickable" id="banishOpp" data-name="Banished" data-desc="<%= player2.zone.banished.length %> cards. Click to view."
+               data-banish-cards='<%= JSON.stringify(player2.zone.banished.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            BAN<div class="count"><%= player2.zone.banished.length %></div>
+          </div>
+          <div class="zone-label">BANISH (<%= player2.name %>)</div>
           <div class="zone-counter gy-clickable" id="gyOpp" data-name="Graveyard" data-desc="<%= player2.zone.graveyard.length %> cards. Click to view."
+<<<<<<< HEAD
                data-gy-cards='<%= JSON.stringify(player2.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.image, desc: gc.card.desc || '', atk: gc.card.atk !== undefined ? gc.card.atk : '', def: gc.card.def !== undefined ? gc.card.def : '', effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
             <% if(player2.zone.graveyard.length > 0) { %><img src="<%= player2.zone.graveyard[player2.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
+=======
+               data-gy-cards='<%= JSON.stringify(player2.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            <% if(player2.zone.graveyard.length > 0) { %><img src="<%= player2.zone.graveyard[player2.zone.graveyard.length-1].card.imageCropped || player2.zone.graveyard[player2.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
+>>>>>>> bac8aac (16th)
             <div class="count"><%= player2.zone.graveyard.length %></div>
           </div>
           <div class="zone-label">GY (<%= player2.name %>)</div>
+          <div class="zone-counter" id="deckOpp" data-name="Deck" data-desc="<%= player2.zone.deck.length %> cards remaining.">
+            🂠<div class="count"><%= player2.zone.deck.length %></div>
+          </div>
+          <div class="zone-label">DECK</div>
         </div>
       </div>
 
@@ -1064,12 +1210,20 @@
 
       <div class="field-mid">
         <div class="side-col">
+<<<<<<< HEAD
           <div class="zone-counter gy-clickable" id="gyMe" data-name="Graveyard" data-desc="<%= player1.zone.graveyard.length %> cards. Click to view."
                data-gy-cards='<%= JSON.stringify(player1.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.image, desc: gc.card.desc || '', atk: gc.card.atk !== undefined ? gc.card.atk : '', def: gc.card.def !== undefined ? gc.card.def : '', effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
             <% if(player1.zone.graveyard.length > 0) { %><img src="<%= player1.zone.graveyard[player1.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
             <div class="count"><%= player1.zone.graveyard.length %></div>
+=======
+          <div class="zone-counter" data-name="Field Spell Zone" data-desc="No Field Spell active.">FIELD</div>
+          <div class="zone-label">FIELD</div>
+          <div class="zone-counter gy-clickable" id="edMe" data-name="Extra Deck" data-desc="<%= player1.zone.extraDeck.length %> cards. Click to view — you can look through your own Extra Deck any time."
+               data-ed-cards='<%= JSON.stringify(player1.zone.extraDeck.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            EX<div class="count"><%= player1.zone.extraDeck.length %></div>
+>>>>>>> bac8aac (16th)
           </div>
-          <div class="zone-label">GY (<%= player1.name %>)</div>
+          <div class="zone-label">EXTRA (<%= player1.name %>)</div>
         </div>
 
         <div class="field-center">
@@ -1156,9 +1310,19 @@
         </div>
 
         <div class="side-col">
+          <div class="zone-counter gy-clickable" id="banishMe" data-name="Banished" data-desc="<%= player1.zone.banished.length %> cards. Click to view."
+               data-banish-cards='<%= JSON.stringify(player1.zone.banished.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            BAN<div class="count"><%= player1.zone.banished.length %></div>
+          </div>
+          <div class="zone-label">BANISH (<%= player1.name %>)</div>
+          <div class="zone-counter gy-clickable" id="gyMe" data-name="Graveyard" data-desc="<%= player1.zone.graveyard.length %> cards. Click to view."
+               data-gy-cards='<%= JSON.stringify(player1.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            <% if(player1.zone.graveyard.length > 0) { %><img src="<%= player1.zone.graveyard[player1.zone.graveyard.length-1].card.imageCropped || player1.zone.graveyard[player1.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
+            <div class="count"><%= player1.zone.graveyard.length %></div>
+          </div>
+          <div class="zone-label">GY (<%= player1.name %>)</div>
           <div class="zone-counter" id="deckMe" data-name="Deck" data-desc="<%= player1.zone.deck.length %> cards remaining.">🂠<div class="count"><%= player1.zone.deck.length %></div></div>
           <div class="zone-label">DECK</div>
-          <div class="zone-counter" data-name="Extra Deck" data-desc="<%= player1.zone.extraDeck.length %> cards.">EX<div class="count"><%= player1.zone.extraDeck.length %></div></div>
         </div>
       </div>
 
@@ -1193,12 +1357,20 @@
 
             const showOverlay = canNormalSummon || canSetST || canActivateSpell;
             const fxInfo = game.getEffectInfo(gameCard.card.name);
+<<<<<<< HEAD
             const pv3 = { name: gameCard.card.name, desc: gameCard.card.desc || "", atk: gameCard.card.atk !== undefined ? gameCard.card.atk : "", def: gameCard.card.def !== undefined ? gameCard.card.def : "", image: gameCard.card.image, effectSummary: fxInfo.summary };
+=======
+            const pv3 = { name: gameCard.card.name, desc: gameCard.card.desc || "", atk: gameCard.card.atk !== undefined ? gameCard.card.atk : "", def: gameCard.card.def !== undefined ? gameCard.card.def : "", image: gameCard.card.image, imageCropped: gameCard.card.imageCropped || gameCard.card.image, effectSummary: fxInfo.summary };
+>>>>>>> bac8aac (16th)
           %>
           <div class="card player-hand-card <%= frameClass(gameCard.card) %>"
                data-instance-id="<%= gameCard.instanceId %>"
                data-summonable="<%= showOverlay ? 'true' : 'false' %>"
+<<<<<<< HEAD
                data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-effect="<%= pv3.effectSummary %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>">
+=======
+               data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-effect="<%= pv3.effectSummary %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>" data-image-cropped="<%= pv3.imageCropped %>">
+>>>>>>> bac8aac (16th)
 
             <img src="<%= gameCard.card.image %>" />
 
@@ -1382,12 +1554,114 @@
       })();
 
       // ---------------------------------------------------
-      // GRAVEYARD VIEWER
+      // FIELD EVENTS — Summon / Set / Ritual (Tribute) Summon /
+      // Spell activate / Trap activate / Flip effect. A card actually
+      // landing on the field just now, as opposed to the plain
+      // fade-in every card gets on every re-render.
       // ---------------------------------------------------
-      function openGyModal(zoneEl, label) {
-        let cards = [];
-        try { cards = JSON.parse(zoneEl.getAttribute("data-gy-cards") || "[]"); } catch (e) { cards = []; }
-        document.getElementById("gyModalTitle").textContent = label + "'s Graveyard (" + cards.length + ")";
+      <%
+        // Redact identity for anything landing FACE-DOWN — a Set
+        // Monster/Spell/Trap never shows its real art in this banner
+        // for either player, matching how Master Duel/Tag Force only
+        // ever show a plain card-back slam for a Set, never a peek at
+        // what it actually is (the owner already knows; that's not
+        // what this banner is for). Spell vs Trap is ALSO never
+        // revealed for a Set — a face-down Spell/Trap Zone card looks
+        // identical either way until it's actually activated, so the
+        // engine only ever sends the single unified "set-spelltrap"
+        // kind here, never "spell-set"/"trap-set".
+        let fieldEventForClient = null;
+        if (typeof lastFieldEvent !== 'undefined' && lastFieldEvent) {
+          const fe = lastFieldEvent;
+          const isSetKind = fe.kind === 'set-monster' || fe.kind === 'set-spelltrap';
+          fieldEventForClient = {
+            kind: fe.kind,
+            instanceId: fe.instanceId,
+            position: fe.position,
+            tributedNames: fe.tributedNames || [],
+            cardName: isSetKind ? null : fe.cardName,
+            staysOnField: fe.staysOnField !== false,
+            isPlayer1: fe.isPlayer1
+          };
+        }
+      %>
+      (function runFieldEventAnimation() {
+        const fe = <%- JSON.stringify(fieldEventForClient) %>;
+        if (!fe) return;
+
+        const KIND_META = {
+          "summon":         { flashClass: "fx-land-summon", label: "NORMAL SUMMON!",       toastClass: "fe-summon" },
+          "set-monster":    { flashClass: "fx-land-set",     label: "SET!",                 toastClass: "fe-set" },
+          "ritual":         { flashClass: "fx-land-ritual",  label: "RITUAL SUMMON!",       toastClass: "fe-ritual" },
+          "set-spelltrap":  { flashClass: "fx-land-set",     label: "SET!",                 toastClass: "fe-set" },
+          "spell-activate": { flashClass: "fx-land-spell",   label: "SPELL CARD ACTIVATE!", toastClass: "fe-spell" },
+          "trap-activate":  { flashClass: "fx-land-trap",    label: "TRAP CARD ACTIVATE!",  toastClass: "fe-trap" },
+          "flip":           { flashClass: "fx-land-flip",    label: "FLIP EFFECT!",         toastClass: "fe-flip" }
+        };
+        const meta = KIND_META[fe.kind];
+        if (!meta) return;
+
+        // A Normal/Set Summon with 1+ Tributes is a Tribute Summon,
+        // however many were tributed — the TCG only ever calls it that,
+        // regardless of the count.
+        let label = meta.label;
+        if ((fe.kind === "summon" || fe.kind === "set-monster") && fe.tributedNames.length > 0) {
+          label = "TRIBUTE SUMMON!";
+        }
+
+        const cardEl = document.querySelector('[data-instance-id="' + fe.instanceId + '"]');
+        if (cardEl) {
+          cardEl.classList.remove(meta.flashClass);
+          void cardEl.offsetWidth; // force reflow so re-adding the class always restarts the animation
+          cardEl.classList.add(meta.flashClass);
+          setTimeout(() => cardEl.classList.remove(meta.flashClass), 1500);
+
+          // A one-shot Spell/Trap (Normal/Quick-Play/Counter) is already
+          // on its way to the Graveyard the moment it resolves — the
+          // engine only keeps a Continuous/Equip/Field card sitting in
+          // the zone. If it's still here to find, visibly send it off
+          // right after the activation flash finishes.
+          if ((fe.kind === "spell-activate" || fe.kind === "trap-activate") && !fe.staysOnField) {
+            setTimeout(() => {
+              cardEl.classList.add("fx-to-graveyard");
+            }, 800);
+          }
+        } else if ((fe.kind === "spell-activate" || fe.kind === "trap-activate") && !fe.staysOnField) {
+          // The card already moved to the Graveyard server-side before
+          // this page ever rendered (same request, right after the
+          // effect resolved), so there's no element left on the field to
+          // animate — pulse the Graveyard icon itself as the "it landed
+          // here" cue instead.
+          const gyEl = document.getElementById(fe.isPlayer1 ? "gyMe" : "gyOpp");
+          if (gyEl) {
+            gyEl.classList.remove("gy-pulse");
+            void gyEl.offsetWidth;
+            gyEl.classList.add("gy-pulse");
+            setTimeout(() => gyEl.classList.remove("gy-pulse"), 900);
+          }
+        }
+
+        const toast = document.getElementById("fieldEventToast");
+        const text = document.getElementById("fieldEventText");
+        const sub = document.getElementById("fieldEventSub");
+        if (toast && text) {
+          text.textContent = label;
+          sub.textContent = fe.cardName
+            ? (fe.cardName + (fe.tributedNames.length ? "  (Tributed: " + fe.tributedNames.join(", ") + ")" : ""))
+            : "";
+          toast.className = "field-event-toast " + meta.toastClass;
+          requestAnimationFrame(() => toast.classList.add("show"));
+          setTimeout(() => toast.classList.remove("show"), 1500);
+        }
+      })();
+
+      // ---------------------------------------------------
+      // ---------------------------------------------------
+      // CARD LIST VIEWER — shared modal for Graveyard, Extra Deck (own
+      // side only — see the click handlers below), and Banished cards.
+      // ---------------------------------------------------
+      function openCardListModal(cards, title) {
+        document.getElementById("gyModalTitle").textContent = title;
         const grid = document.getElementById("gyModalGrid");
         grid.innerHTML = "";
         if (cards.length === 0) {
@@ -1415,12 +1689,33 @@
         }
         document.getElementById("gyModalOverlay").style.display = "flex";
       }
+      function openZoneModal(zoneEl, dataAttr, label) {
+        let cards = [];
+        try { cards = JSON.parse(zoneEl.getAttribute(dataAttr) || "[]"); } catch (e) { cards = []; }
+        openCardListModal(cards, label + " (" + cards.length + ")");
+      }
 
       const gyOpp = document.getElementById("gyOpp");
-      if (gyOpp) gyOpp.addEventListener("click", (e) => { e.stopPropagation(); openGyModal(gyOpp, "<%= player2.name %>"); });
+      if (gyOpp) gyOpp.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(gyOpp, "data-gy-cards", "<%= player2.name %>'s Graveyard"); });
 
       const gyMe = document.getElementById("gyMe");
-      if (gyMe) gyMe.addEventListener("click", (e) => { e.stopPropagation(); openGyModal(gyMe, "<%= player1.name %>"); });
+      if (gyMe) gyMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(gyMe, "data-gy-cards", "<%= player1.name %>'s Graveyard"); });
+
+      // Extra Deck: yours is an open book any time (real rule — a player
+      // may look through their own Extra Deck whenever they like) but the
+      // opponent's is never inspectable, so only YOUR zone gets a click
+      // handler / card data at all — see the template below, which
+      // simply never renders data-ed-cards or the "clickable" styling
+      // for the opponent's Extra Deck counter.
+      const edMe = document.getElementById("edMe");
+      if (edMe) edMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(edMe, "data-ed-cards", "<%= player1.name %>'s Extra Deck"); });
+
+      // Banished cards are face-up/public in this engine, so both
+      // players' Banish Zones are viewable, same as the Graveyard.
+      const banishOpp = document.getElementById("banishOpp");
+      if (banishOpp) banishOpp.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(banishOpp, "data-banish-cards", "<%= player2.name %>'s Banished Cards"); });
+      const banishMe = document.getElementById("banishMe");
+      if (banishMe) banishMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(banishMe, "data-banish-cards", "<%= player1.name %>'s Banished Cards"); });
 
       document.getElementById("gyModalClose").addEventListener("click", () => {
         document.getElementById("gyModalOverlay").style.display = "none";

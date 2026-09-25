@@ -100,3 +100,149 @@ invariant violations or exceptions.
 - Light GX Tag Force-style polish: an Orbitron display face for
   names/LP/phase text (Rajdhani for body text), a subtle red/blue wash
   behind each player's header panel, and a brighter LP gauge glow.
+<<<<<<< HEAD
+=======
+
+## Field-event animations (Master Duel/Tag Force-style)
+
+Every card actually landing on the field now gets a distinct, dramatic
+animation and a centered callout banner — not just the plain fade-in
+every card already got on re-render:
+
+- **Normal Summon** — gold flash + scale pop, "NORMAL SUMMON!"
+- **Tribute/Advance Summon** — same treatment, banner instead reads
+  "TRIBUTE SUMMON!" (or "ADVANCE SUMMON!" for 2 tributes) with a
+  sub-line listing what was tributed
+- **Set** (monster, or Spell/Trap face-down) — blue flash + slam,
+  "SET!" — deliberately shows **no card art or name**, even for your
+  own cards, matching how Master Duel/Tag Force only ever show a plain
+  card-back for a Set. This is enforced server-side (the identity is
+  stripped out of the event data before it's ever sent to the
+  browser), not just hidden in the UI, so it can't leak through
+  dev tools either.
+- **Ritual Summon** — the biggest treatment: a longer, multi-stage
+  purple/blue burst, "RITUAL SUMMON!", with tributed materials listed
+- **Spell/Trap activating** (from hand or flipping up a Set card,
+  including mid-battle Traps like Mirror Force) — green flash for
+  Spells, magenta for Traps, "SPELL/TRAP CARD ACTIVATE!"
+- **Flip effect triggering** — a 3D flip-reveal animation with a cyan
+  flash, "FLIP EFFECT!"
+
+Implementation: `MainGame.recordFieldEvent(kind, gc, extra)` is called
+at each of the relevant spots (`normalSummon`, `setMonster`,
+`ritualSummon`, `setSpellTrap`, `activateSpellFromHand`,
+`activateSetCard`, and `Effects.triggerFlip`) and stored as a one-shot
+`lastFieldEvent`, threaded through `route/game.js` exactly like the
+existing `lastBattleEvent`/`lastDrawEvent` pattern. `game.ejs` reads it,
+redacts identity for Set-kind events, and a `playFieldEvent()` script
+finds the exact card element by `data-instance-id` and animates it.
+
+## AI behavior fix: Spear Dragon (and similar) sitting in Defense forever
+
+Spear Dragon is forced into Defense Position immediately after it
+attacks — but that's only a one-turn side effect, not a strategic
+choice to wall up. On a later turn there's nothing stopping it from
+freely switching back to Attack Position like any other monster (once
+per turn, hasn't attacked/been Summoned yet that turn) — the AI just
+never considered doing so. `AIController.actMainPhase` now proactively
+switches any face-up Defense-Position monster with
+`Effects.forcedDefenseAfterAttack(...)` back to Attack, once it's
+legal to do so.
+
+## A second real AI freeze, found while re-testing
+
+While re-running the fuzzer after the above, ~1 in 250 AI-vs-AI games
+hit a genuine (if rare) infinite loop: `AIController`'s tribute-count
+math used the *raw* printed Level of the monster
+(`game.getRequiredTributes(card.level)`), but the engine's actual
+summon validation (`getRequiredTributesForSummon`) accounts for Cost
+Down's "-2 Levels this turn" (and Soul Exchange's saved credits). With
+Cost Down active, this mismatch meant the AI would compute "needs 2
+Tributes" while the engine expected 1, submit the wrong tribute count,
+have the summon silently rejected — and, since `AIController` never
+checked whether its own dispatched action actually succeeded, loop
+forever retrying the exact same doomed summon. Fixed by having
+`AIController` use `getRequiredTributesForSummon` (the same
+Cost-Down/Soul-Exchange-aware calculation the engine itself uses)
+instead of the raw, unadjusted level.
+
+## Round 2: animation glitch fix, terminology, extra deck/banish zones, playmat layout
+
+**The rotation glitch** — a Set or face-up Defense Position monster is
+supposed to render sideways (that's the real-rules visual for Defense
+Position). The `cardAppear` fade-in that plays on *every* card on
+*every* re-render, and every `fx-land-*` landing animation added
+earlier, each set their own `transform` value in their keyframes —
+and a CSS animation's `transform` completely replaces the element's
+static `transform` for as long as it's running. Since none of those
+keyframes included the sideways rotation, any Defense/Set monster
+would flash upright for the length of whichever animation was
+playing — on `cardAppear` specifically, that's on every single
+re-render, matching "glitches during phases." Fixed by moving the
+rotation into a `--rot` CSS custom property set by `.card.defense`,
+and folding `rotate(var(--rot))` into the start of every keyframe's
+`transform` instead of overwriting it.
+
+**Terminology**: dropped "ADVANCE SUMMON!" — it's just Tribute Summon
+regardless of how many monsters were tributed (1 or 2+), so the
+banner always says "TRIBUTE SUMMON!" now.
+
+**Set Spell/Trap no longer reveals which it is.** A face-down card in
+the Spell/Trap Zone looks identical whether it's a Spell or a Trap —
+neither player can tell until it's activated. The engine used to
+compute and send `"spell-set"` vs `"trap-set"` as two different event
+kinds; even though the client redacted the *name*, the kind itself
+was a tell. Now the engine only ever emits one generic
+`"set-spelltrap"` kind, so the distinction can't leak by accident, no
+matter whose card it is.
+
+**Activate → Graveyard animation.** Continuous/Equip/Field
+Spells/Traps stay on the field and get the activation flash on the
+actual card, same as before. A one-shot Spell/Trap (Normal/
+Quick-Play/Counter Trap) is already moved to the Graveyard
+server-side, in the same request, before the page ever re-renders —
+so there's no element left on the board to animate away. Two cases,
+handled separately: if the card element is still findable (Continuous/
+Equip/Field), it gets the activation flash; if it already left the
+field, the Graveyard icon itself gets a brief pulse as the "it landed
+here" cue instead of trying to animate a card that no longer exists in
+the DOM.
+
+**Preview panel is artwork-only everywhere now.** Every card
+preview site was already supposed to prefer the cropped/artwork-only
+image over the full bordered card, but two spots — hand cards and one
+of the response-window card lists — were missing the
+`data-image-cropped` attribute entirely and silently fell back to the
+full card. Fixed, and the Graveyard/Extra Deck/Banish viewers below
+were all built to use the cropped artwork from the start.
+
+**New: Extra Deck and Banished Cards zones.**
+- Your own Extra Deck is viewable any time (real rule — you can look
+  through your own Extra Deck whenever you like), via the same
+  card-grid modal as the Graveyard. The opponent's Extra Deck shows a
+  count only — no click handler, no card data ever sent to the
+  browser for it.
+- Banished cards (public/face-up in this engine) are viewable for
+  both players, same modal.
+- The Graveyard/Extra Deck/Banish viewers now share one generalized
+  `openCardListModal()` function instead of three separate
+  copy-pasted implementations.
+
+**Playmat repositioned** to match the real card-game layout: Field
+Spell Zone (top) and Extra Deck (bottom) on the left of the Monster/
+Spell-Trap grid; Banished (top), Graveyard (middle), and Deck
+(bottom) on the right — same arrangement for both players' rows. The
+Field Spell Zone itself is a visual placeholder only (neither current
+deck contains a Field Spell card, so there's no game logic to wire up
+yet — worth a follow-up once one's actually in a deck).
+
+**One more real crash found and fixed while re-testing all this:**
+Change of Heart/Brain Control-style temporary control returns the
+monster to its original owner at the End Phase — but if that owner's
+Monster Zone filled up while their monster was on loan (they can
+still Summon normally during that time), the auto-return crashed
+trying to add it to a full zone. Now it falls back to leaving the
+monster with the current controller and logs why, instead of
+crashing.
+
+>>>>>>> bac8aac (16th)

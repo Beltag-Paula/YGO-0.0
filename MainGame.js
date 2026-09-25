@@ -34,6 +34,7 @@ class MainGame {
         this.lastRevealEvent = null;            // a Deck search effect (Sangan, ...) revealing the card it found
         this.lastDrawEvent = null;              // [{ playerIsPlayer1, count }, ...] — most recent draw(s), for animation
         this.lastDiscardEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent discard(s), for animation
+        this.lastFieldEvent = null;             // one card landing on the field (Summon/Set/Ritual/Tribute/Spell/Trap/Flip) — for animation
         this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
         this.knownGYInstanceIds = new Set();    // tracks which GY arrivals have already fired their death-trigger
 
@@ -157,10 +158,11 @@ class MainGame {
         if (this.gameOver) return;
         if (!this.state.waitingForAction) return;
 
-        // Each dispatched action starts fresh — any draw/discard animation
-        // shown should only ever reflect what THIS action just did.
+        // Each dispatched action starts fresh — any draw/discard/field
+        // animation shown should only ever reflect what THIS action just did.
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
+        this.lastFieldEvent = null;
 
         // While a Battle Response Window is open, only the defender may
         // act, and only by activating a Set card or passing.
@@ -391,6 +393,7 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
+        this.recordFieldEvent("summon", gc, { tributedNames: tributesToProcess.map(t => t.card.name) });
         Effects.triggerOnSummon(this, gc);
         this.checkSummonTrigger(gc);
         this.checkForWinner();
@@ -436,6 +439,7 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`🂠 ${p.name} sets a monster face-down in Defense Position.`);
+        this.recordFieldEvent("set-monster", gc, { tributedNames: tributesToProcess.map(t => t.card.name) });
         this.checkForWinner();
         return true;
     }
@@ -968,6 +972,9 @@ class MainGame {
         if (meta.cost?.lp) p.dealDamage(meta.cost.lp);
 
         this.addLog(`${p.name} activates ${gc.card.name}!`);
+        this.recordFieldEvent("spell-activate", gc, {
+            staysOnField: meta.subtype === "continuous" || meta.subtype === "equip" || meta.subtype === "field"
+        });
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);
@@ -1119,8 +1126,26 @@ class MainGame {
         ritualMonster.state.hasBeenSummonedThisTurn = true;
 
         this.addLog(`${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
+        this.recordFieldEvent("ritual", ritualMonster, { tributedNames: tributes.map(t => t.card.name) });
         this.checkForWinner();
         return true;
+    }
+
+    // One card landing on the field, for the client to animate — a
+    // Normal/Set Summon, a Ritual Summon, a Spell/Trap being Set or
+    // activated, or a Flip effect triggering. One-shot: route/game.js
+    // reads and clears it on the very next render, same pattern as
+    // lastBattleEvent/lastRevealEvent just below.
+    recordFieldEvent(kind, gc, extra = {}) {
+        this.lastFieldEvent = {
+            kind, // "summon" | "set-monster" | "ritual" | "set-spelltrap" | "spell-activate" | "trap-activate" | "flip"
+            instanceId: gc.instanceId,
+            isPlayer1: gc.owner === this.player1,
+            cardName: gc.card.name,
+            cardImage: gc.card.image,
+            position: gc.position || null,
+            ...extra
+        };
     }
 
     // True if `player`currently controls a face-up monster on the field
@@ -1205,6 +1230,12 @@ class MainGame {
         gc.turnSet = this.turn;
 
         this.addLog(`🂠 ${p.name} sets a card face-down in the Spell/Trap Zone.`);
+        // A face-down Spell/Trap Zone card looks identical whether it's a
+        // Spell or a Trap — neither player can tell which until it's
+        // activated. One unified event kind (never "spell-set" vs
+        // "trap-set") means that distinction can't leak through the
+        // animation even by accident, for either player's own Sets.
+        this.recordFieldEvent("set-spelltrap", gc);
         return true;
     }
 
@@ -1286,6 +1317,9 @@ class MainGame {
         }
 
         this.addLog(`${owner.name} activates the set card ${gc.card.name}!`);
+        this.recordFieldEvent(meta.kind === "trap" ? "trap-activate" : "spell-activate", gc, {
+            staysOnField: meta.subtype === "continuous" || meta.subtype === "equip" || meta.subtype === "field"
+        });
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
         Effects.activate(this, gc, target);

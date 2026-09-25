@@ -178,10 +178,18 @@ router.get("/", (req, res) => {
     const drawEvent = activeGameInstance.lastDrawEvent;
     const discardEvent = activeGameInstance.lastDiscardEvent;
     const revealEvent = activeGameInstance.lastRevealEvent;
+<<<<<<< HEAD
+=======
+    const fieldEvent = activeGameInstance.lastFieldEvent;
+>>>>>>> bac8aac (16th)
     activeGameInstance.lastBattleEvent = null;
     activeGameInstance.lastDrawEvent = null;
     activeGameInstance.lastDiscardEvent = null;
     activeGameInstance.lastRevealEvent = null;
+<<<<<<< HEAD
+=======
+    activeGameInstance.lastFieldEvent = null;
+>>>>>>> bac8aac (16th)
 
     res.render("game", {
         player1: activeGameInstance.player1,
@@ -203,6 +211,10 @@ router.get("/", (req, res) => {
         lastDrawEvent: drawEvent,
         lastDiscardEvent: discardEvent,
         lastRevealEvent: revealEvent,
+<<<<<<< HEAD
+=======
+        lastFieldEvent: fieldEvent,
+>>>>>>> bac8aac (16th)
         game: activeGameInstance
     });
 });

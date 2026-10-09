@@ -93,6 +93,7 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`\n==================================================`);
+  console.log("👹".repeat(30));
   console.log(`👻👻👻👻👻 YGO Duel Engine Server Online!!!!!! 👻👻👻👻👻👻`);
   console.log(`Play Arena Mat: http://localhost:${PORT}/game/start`);
   console.log(`Home Base View: http://localhost:${PORT}/`);

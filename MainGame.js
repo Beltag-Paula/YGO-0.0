@@ -22,22 +22,35 @@ class MainGame {
         // before damage is calculated).
         this.pendingAttack = null;     // { attacker, target }
         this.battleResponse = null;    // { defender }
+        this.summonResponse = null;    // { defender, summonedGc } — a Trap Hole-style
+                                        // "when your opponent Normal/Flip Summons..."
+                                        // response window, parallel to battleResponse.
         this.attackNegated = false;
         this.forceEndBattlePhase = false;
         this.reflectDamage = 0;                 // Magic Cylinder-style reflected damage
         this.preventBattleDamageFor = null;     // Waboku: player who takes no battle damage this turn
         this.preventDestructionFor = null;      // Waboku: player whose monsters can't be destroyed by battle this turn
         this.lastBattleEvent = null;            // structured info for the UI: who attacked whom, for how much
+        this.lastRevealEvent = null;            // a Deck search effect (Sangan, ...) revealing the card it found
         this.lastDrawEvent = null;              // [{ playerIsPlayer1, count }, ...] — most recent draw(s), for animation
         this.lastDiscardEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent discard(s), for animation
+        this.lastDestroyEvent = null;           // [{ playerIsPlayer1, count }, ...] — most recent mass-destruction batch, for animation
+        this.lastFieldEvent = null;             // one card landing on the field (Summon/Set/Ritual/Tribute/Spell/Trap/Flip) — for animation
         this.turnEffects = [];                  // queued revert() closures for "until the End Phase" effects
         this.knownGYInstanceIds = new Set();    // tracks which GY arrivals have already fired their death-trigger
 
         this.state = {
             waitingForAction: false,
             actedThisWindow: false,
-            awaitingResponse: false
+            awaitingResponse: false,
+            awaitingSummonResponse: false,
+            awaitingDiscardChoice: false,
+            awaitingPositionChoice: false,
+            awaitingRitualChoice: false
         };
+        this.discardChoice = null;  // { player, count } while awaitingDiscardChoice is true
+        this.positionChoice = null; // { player, instanceIds } while awaitingPositionChoice is true
+        this.ritualChoice = null;   // { player, ritualSpellInstanceId, ritualMonsterInstanceId, requiredLevel, candidateInstanceIds } while awaitingRitualChoice is true
     }
 
     addLog(msg) {
@@ -54,6 +67,17 @@ class MainGame {
 
     recordDiscard(entries) {
         this.lastDiscardEvent = entries;
+    }
+
+    // entries: [{ playerIsPlayer1, count }, ...] — for a mass-destruction
+    // effect (Dark Hole, Cyber Jar's own "destroy all monsters" step,
+    // etc.) sending several monsters to the Graveyard at once. Separate
+    // from the single-card fx-land-*/fx-to-graveyard system those use,
+    // since this is genuinely a different shape of event (a whole batch,
+    // not one specific instanceId) — same one-shot overwrite pattern as
+    // recordDraw/recordDiscard above.
+    recordDestroy(entries) {
+        this.lastDestroyEvent = entries;
     }
 
     startDuel() {
@@ -152,20 +176,68 @@ class MainGame {
         if (this.gameOver) return;
         if (!this.state.waitingForAction) return;
 
-        // Each dispatched action starts fresh — any draw/discard animation
-        // shown should only ever reflect what THIS action just did.
+        // Each dispatched action starts fresh — any draw/discard/destroy/
+        // field animation shown should only ever reflect what THIS
+        // action just did.
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
+        this.lastDestroyEvent = null;
+        this.lastFieldEvent = null;
 
         // While a Battle Response Window is open, only the defender may
         // act, and only by activating a Set card or passing.
         if (this.state.awaitingResponse) {
             if (action.type === "ACTIVATE_SET_CARD") {
-                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, true);
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, "battle");
             } else if (action.type === "ACTIVATE_HAND_CARD") {
                 this.activateHandResponseCard(action.payload.card);
             } else if (action.type === "PASS_RESPONSE") {
                 this.resolveBattleDamage();
+            }
+            return;
+        }
+
+        // While a Summon Response Window is open (Trap Hole-style "when
+        // your opponent Normal/Flip Summons..." traps), same idea: only
+        // the defender may act, only by activating a Set card or passing.
+        if (this.state.awaitingSummonResponse) {
+            if (action.type === "ACTIVATE_SET_CARD") {
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, "summon");
+            } else if (action.type === "PASS_RESPONSE") {
+                this.resolveSummonResponse();
+            }
+            return;
+        }
+
+        // End Phase hand-size discard window — the only thing that can
+        // happen here is the discarding player naming exactly the right
+        // number of cards.
+        if (this.state.awaitingDiscardChoice) {
+            if (action.type === "DISCARD_CHOICE") {
+                this.resolveDiscardChoice(action.payload.instanceIds || []);
+            }
+            return;
+        }
+
+        // A "you choose Attack or Defense for each of these" window
+        // (Cyber Jar's Special Summons) — the monsters are already on
+        // the field with a sensible default; this only ever revises it.
+        if (this.state.awaitingPositionChoice) {
+            if (action.type === "CONFIRM_POSITIONS") {
+                this.resolvePositionChoice(action.payload.overrides || {});
+            }
+            return;
+        }
+
+        // Ritual Summon material choice — nothing about the Ritual
+        // Summon happens until the player names which monsters they're
+        // Tributing.
+        if (this.state.awaitingRitualChoice) {
+            if (action.type === "RITUAL_TRIBUTE_CHOICE") {
+                this.resolveRitualChoice(action.payload.instanceIds || []);
+            } else if (action.type === "CANCEL_RITUAL_CHOICE") {
+                this.ritualChoice = null;
+                this.state.awaitingRitualChoice = false;
             }
             return;
         }
@@ -194,8 +266,8 @@ class MainGame {
                 this.setSpellTrap(action.payload.card);
                 break;
             case "ACTIVATE_SET_CARD":
-                if (!inMainPhase) return; // response-window case handled above
-                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, false);
+                if (!inMainPhase) return; // response-window cases handled above
+                this.activateSetCard(action.payload.card, action.payload.targetInstanceId || null, null);
                 break;
             case "ATTACK":
                 if (this.phase !== "battle") return;
@@ -204,6 +276,12 @@ class MainGame {
             case "ACTIVATE_MONSTER_EFFECT":
                 if (!inMainPhase) return;
                 this.activateMonsterEffect(action.payload.card, action.payload.targetInstanceId || null);
+                break;
+            case "UNEQUIP_UNION":
+                if (!inMainPhase) return;
+                if (action.payload.host && action.payload.host.owner === this.currentPlayer) {
+                    this.unequipUnionMonster(action.payload.host);
+                }
                 break;
             case "PASS":
                 this.endActionWindow();
@@ -241,8 +319,15 @@ class MainGame {
         } else if (this.phase === "m2") {
             this.phase = "end";
         } else if (this.phase === "end") {
-            this.enforceHandSizeLimit(this.currentPlayer);
-            this.endTurn(); // sets this.phase back to "draw" for the new current player
+            // Rulebook rule: at more than 6 cards in hand at the End
+            // Phase, discard down to 6 — and it's always the *player's own
+            // choice* which ones, never automatic. openDiscardChoice()
+            // sets up that window; endTurn() only happens once it's been
+            // resolved (see resolveDiscardChoice below), same deferred-
+            // continuation shape as any other response window.
+            if (!this.openDiscardChoice(this.currentPlayer)) {
+                this.endTurn(); // sets this.phase back to "draw" for the new current player
+            }
         }
     }
 
@@ -268,6 +353,13 @@ class MainGame {
 
     getIgnitionMeta(cardName) {
         return Effects.getIgnition(cardName);
+    }
+
+    // What does this card actually DO, in plain language? Used by the UI
+    // to show effect-type badges and an explanation on every card, not
+    // just the ones with a currently-clickable action.
+    getEffectInfo(cardName) {
+        return Effects.getEffectInfo(cardName);
     }
 
     getRequiredTributes(level) {
@@ -361,7 +453,10 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`${p.name} Normal Summons ${gc.card.name} (ATK ${this.getAtk(gc)}/DEF ${this.getDef(gc)})!`);
+        this.recordFieldEvent("summon", gc, { tributedNames: tributesToProcess.map(t => t.card.name) });
         Effects.triggerOnSummon(this, gc);
+        this.enforceDragonCaptureJar(gc);
+        this.checkSummonTrigger(gc);
         this.checkForWinner();
         return true;
     }
@@ -405,6 +500,7 @@ class MainGame {
         this.state.actedThisWindow = true;
 
         this.addLog(`🂠 ${p.name} sets a monster face-down in Defense Position.`);
+        this.recordFieldEvent("set-monster", gc, { tributedNames: tributesToProcess.map(t => t.card.name) });
         this.checkForWinner();
         return true;
     }
@@ -496,8 +592,13 @@ class MainGame {
         this.addLog(`${gc.card.name} changes to ${gc.position.toUpperCase()} position.`);
 
         // Flip Summon: a face-down monster turning face-up triggers its
-        // FLIP effect (if it has one programmed).
-        if (wasFaceDown) Effects.triggerFlip(this, gc);
+        // FLIP effect (if it has one programmed), and can also trigger
+        // an opponent's "when you Flip Summon..." trap (Trap Hole).
+        if (wasFaceDown) {
+            Effects.triggerFlip(this, gc);
+            this.enforceDragonCaptureJar(gc);
+            this.checkSummonTrigger(gc);
+        }
 
         this.checkForWinner();
         return true;
@@ -541,6 +642,60 @@ class MainGame {
             if (meta.kind === "trap" && gc.turnSet === this.turn) return false;
             return meta.window === "response" || meta.window === "anytime";
         });
+    }
+
+    // Trap Hole-style "when your opponent Normal/Flip Summons a monster
+    // with (condition)..." traps — a parallel, narrower window to
+    // getEligibleResponses. Cards with window:"anytime" are freely
+    // activatable whenever their controller has priority (which
+    // includes this window too), same as they are for battle responses.
+    getEligibleSummonResponses(player) {
+        return player.getSpellTrapsOnField().filter(gc => {
+            if (gc.faceUp) return false;
+            const meta = Effects.getMeta(gc.card.name);
+            if (!meta) return false;
+            if (meta.kind === "trap" && gc.turnSet === this.turn) return false;
+            return meta.window === "summon" || meta.window === "anytime";
+        });
+    }
+
+    // Called right after a Normal Summon or (manual) Flip Summon
+    // completes. Opens a Summon Response Window for the opponent if they
+    // control anything that could react to it — mirrors declareAttack's
+    // battle response window, just for a different trigger.
+    checkSummonTrigger(summonedGc) {
+        if (this.gameOver || !summonedGc || summonedGc.location !== "monster") return;
+        const defender = summonedGc.owner === this.player1 ? this.player2 : this.player1;
+        const eligible = this.getEligibleSummonResponses(defender);
+        if (eligible.length === 0) return;
+        this.summonResponse = { defender, summonedGc };
+        this.state.awaitingSummonResponse = true;
+        this.addLog(`${defender.name} may activate a Set Spell/Trap Card in response to the Summon.`);
+    }
+
+    resolveSummonResponse() {
+        this.summonResponse = null;
+        this.state.awaitingSummonResponse = false;
+    }
+
+    // Dragon Capture Jar: "Change all face-up Dragon-Type monsters on
+    // the field to Defense Position, also they cannot change their
+    // Battle Position." A blanket, non-targeted Continuous Trap effect —
+    // legally activatable with zero Dragons on the field (same as any
+    // Continuous Trap with no target requirement), and it keeps applying
+    // to Dragons that show up later while it's still active. Called
+    // right after a monster turns face-up (Normal Summon, Flip Summon,
+    // Ritual Summon) so that "later" part is actually true instead of
+    // only ever checking once at the moment Dragon Capture Jar itself
+    // activates.
+    enforceDragonCaptureJar(gc) {
+        if (!gc || !gc.faceUp || gc.card.race !== "Dragon") return;
+        const activeJar = [this.player1, this.player2].some(p =>
+            p.getSpellTrapsOnField().some(st => st.faceUp && Effects.normalize(st.card.name) === "dragon capture jar")
+        );
+        if (!activeJar) return;
+        gc.position = "defense";
+        gc.modifiers.cannotChangePosition = true;
     }
 
     declareAttack(attacker, target = null) {
@@ -612,7 +767,20 @@ class MainGame {
             return amount;
         };
 
-        const destroy = (ownerPlayer, gc) => {
+        const destroy = (gc) => {
+            // BUGFIX: this used to take a captured "believed owner" — either
+            // `defender` or `this.currentPlayer` — from before this Battle
+            // Response Window opened. If a Trap activated in that window
+            // changed who actually controls the card (Enemy Controller/
+            // Change of Heart stealing the ATTACKING monster mid-battle is
+            // a real, if rare, legal interaction), that captured owner
+            // reference goes stale: it still points at the player who no
+            // longer has this card in their zone at all, so moveCard()
+            // would crash searching the wrong player's Monster Zone for
+            // it. gc.owner always reflects who currently, actually
+            // controls the card, so use that instead of trusting a
+            // snapshot taken before the window opened.
+            const ownerPlayer = gc.owner;
             if (this.preventDestructionFor === ownerPlayer) {
                 this.addLog(`${gc.card.name} cannot be destroyed by battle this turn.`);
                 return false;
@@ -650,20 +818,20 @@ class MainGame {
             if (target.position === "attack") {
                 const defVal = this.getAtk(target);
                 if (atkVal > defVal) {
-                    destroy(defender, target);
+                    destroy(target);
                     const dealt = dealDamage(defender, atkVal - defVal);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = defender === this.player1;
                     this.addLog(`${target.card.name} destroyed! ${defender.name} takes ${dealt} damage.`);
                 } else if (atkVal < defVal) {
-                    destroy(this.currentPlayer, attacker);
+                    destroy(attacker);
                     const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
                     this.addLog(`${attacker.card.name} destroyed! ${this.currentPlayer.name} takes ${dealt} damage.`);
                 } else {
-                    destroy(defender, target);
-                    destroy(this.currentPlayer, attacker);
+                    destroy(target);
+                    destroy(attacker);
                     this.addLog("Both monsters are destroyed in the collision!");
                 }
             } else {
@@ -675,7 +843,7 @@ class MainGame {
                 if (wasFaceDown) this.addLog(`The set monster is revealed: ${target.card.name} (DEF ${defVal})!`);
 
                 if (atkVal > defVal) {
-                    destroy(defender, target);
+                    destroy(target);
                     this.addLog(`${target.card.name} destroyed!`);
                     if (Effects.hasPiercing(attacker.card.name)) {
                         const pierce = dealDamage(defender, atkVal - defVal);
@@ -696,7 +864,7 @@ class MainGame {
 
                 // Per the rulebook: Flip effects on an attacked face-down
                 // monster resolve AFTER damage calculation completes.
-                if (wasFaceDown) Effects.triggerFlip(this, target);
+                if (wasFaceDown) { Effects.triggerFlip(this, target); this.enforceDragonCaptureJar(target); }
             }
         }
 
@@ -748,6 +916,32 @@ class MainGame {
         });
     }
 
+    // BUGFIX: several continuous Traps (Spellbinding Circle, Shadow
+    // Spell, Fiendish Chain, Call of the Haunted) tie themselves to one
+    // specific monster and say, on the card itself, "When that monster
+    // is destroyed, destroy this card." None of that was previously
+    // enforced — the trap just sat in the Spell/Trap Zone forever,
+    // permanently occupying a zone slot for nothing once its target was
+    // long gone. This is the reverse of cleanupOrphanedEquips just
+    // above (that one frees an Equip Spell when ITS monster leaves; this
+    // one destroys these Traps under the same condition), and the
+    // opposite direction — the Trap itself leaving the field — is
+    // handled at the single choke point in Player.moveCard via
+    // card.linkedRevert(), set up by each of these cards' own handler
+    // in Effects.js.
+    cleanupOrphanedBinds() {
+        [this.player1, this.player2].forEach(owner => {
+            owner.getSpellTrapsOnField().forEach(gc => {
+                if (!gc.linkedTarget) return;
+                const target = this.findMonsterAnywhereOnField(gc.linkedTarget);
+                if (!target) {
+                    owner.moveCard(gc, "spellTrap", "graveyard");
+                    this.addLog(`${gc.card.name} is destroyed — its target left the field.`);
+                }
+            });
+        });
+    }
+
     // Scans for monsters that newly arrived in either Graveyard since the
     // last check, and fires "sent from the field to the GY" effects
     // (Sangan, Witch of the Black Forest, etc.) for the ones that
@@ -766,6 +960,7 @@ class MainGame {
 
     checkForWinner() {
         this.cleanupOrphanedEquips();
+        this.cleanupOrphanedBinds();
         this.processNewGraveyardArrivals();
         if (this.gameOver) return;
 
@@ -872,11 +1067,26 @@ class MainGame {
         if (meta.cost?.lp) p.dealDamage(meta.cost.lp);
 
         this.addLog(`${p.name} activates ${gc.card.name}!`);
+        this.recordFieldEvent("spell-activate", gc, {
+            staysOnField: meta.subtype === "continuous" || meta.subtype === "equip" || meta.subtype === "field"
+        });
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
+        this.lastDestroyEvent = null;
         Effects.activate(this, gc, target);
 
-        if (meta.subtype === "normal" || meta.subtype === "quickplay") {
+        // BUGFIX: a targeted Spell/Trap CAN legally target itself (e.g.
+        // Mystical Space Typhoon targeting another face-up S/T is the
+        // common case, but nothing stops it from targeting itself — it's
+        // already face-up on the field by the time its own effect
+        // resolves). If the handler above already moved gc off the
+        // field as a side effect of resolving against itself, this
+        // second move-to-graveyard would try to remove a card that's no
+        // longer in the zone and crash Player.removeCard. Checking
+        // gc.location first makes this the same safe "only move it if
+        // it's still there" guard everywhere else in this file already
+        // uses before touching a zone.
+        if ((meta.subtype === "normal" || meta.subtype === "quickplay") && gc.location === "spellTrap") {
             p.moveCard(gc, "spellTrap", "graveyard");
         }
 
@@ -984,26 +1194,90 @@ class MainGame {
             return false;
         }
 
-        // Greedily tribute the fewest, highest-Level monsters (from hand or
-        // field) needed to reach the required total Level.
         const pool = [
             ...player.zone.hand.filter(gc => gc.instanceId !== ritualMonster.instanceId && this.isMonster(gc)),
             ...player.getMonstersOnField()
-        ].sort((a, b) => (b.card.level || 0) - (a.card.level || 0));
-
-        const tributes = [];
-        let totalLevel = 0;
-        for (const gc of pool) {
-            if (totalLevel >= recipe.tributeLevel) break;
-            tributes.push(gc);
-            totalLevel += (gc.card.level || 0);
-        }
-
-        if (totalLevel < recipe.tributeLevel) {
+        ];
+        const totalAvailable = pool.reduce((sum, gc) => sum + (gc.card.level || 0), 0);
+        if (totalAvailable < recipe.tributeLevel) {
             this.addLog(`Not enough monsters to Tribute for ${ritualSpellGC.card.name} (need total Level ${recipe.tributeLevel}).`);
             return false;
         }
 
+        // Real rule: the controller picks which monsters (hand and/or
+        // field) to Tribute, as long as their combined Level meets the
+        // requirement — it's never an automatic "whatever's biggest"
+        // pick. Only an interactive window actually delivers that
+        // choice, so — same reasoning as Cyber Jar's position choice —
+        // this only opens one for Player 1 (this engine only ever seats
+        // one human, always as Player 1); the AI keeps its own
+        // greedy-tribute heuristic below with no window needed.
+        if (player === this.player1) {
+            this.openRitualChoice(player, ritualSpellGC, ritualMonster, recipe, pool);
+            return true;
+        }
+
+        const greedyPool = [...pool].sort((a, b) => (b.card.level || 0) - (a.card.level || 0));
+        const tributes = [];
+        let totalLevel = 0;
+        for (const gc of greedyPool) {
+            if (totalLevel >= recipe.tributeLevel) break;
+            tributes.push(gc);
+            totalLevel += (gc.card.level || 0);
+        }
+        this.completeRitualSummon(player, ritualMonster, tributes, ritualSpellGC.card.name);
+        return true;
+    }
+
+    // Opens the "choose your Tribute materials" window for a Ritual
+    // Summon. candidatePool is everything eligible (hand + field monsters,
+    // minus the Ritual Monster itself); the player names any subset of
+    // it whose combined Level meets requiredLevel.
+    openRitualChoice(player, ritualSpellGC, ritualMonster, recipe, candidatePool) {
+        this.ritualChoice = {
+            player,
+            ritualSpellName: ritualSpellGC.card.name,
+            ritualMonsterInstanceId: ritualMonster.instanceId,
+            requiredLevel: recipe.tributeLevel,
+            candidateInstanceIds: candidatePool.map(gc => gc.instanceId)
+        };
+        this.state.awaitingRitualChoice = true;
+        this.state.waitingForAction = true;
+        this.addLog(`${player.name} must choose Tribute materials totaling Level ${recipe.tributeLevel}+ for ${ritualMonster.card.name}.`);
+    }
+
+    resolveRitualChoice(instanceIds) {
+        if (!this.state.awaitingRitualChoice || !this.ritualChoice) return false;
+        const { player, ritualMonsterInstanceId, requiredLevel, candidateInstanceIds } = this.ritualChoice;
+
+        const ritualMonster = player.zone.hand.find(gc => gc.instanceId === ritualMonsterInstanceId);
+        if (!ritualMonster) return false; // shouldn't happen — it never left hand while this window was open
+
+        const ids = Array.isArray(instanceIds) ? [...new Set(instanceIds)] : [];
+        if (ids.some(id => !candidateInstanceIds.includes(id))) return false; // not a legal candidate
+
+        const tributes = ids.map(id =>
+            player.zone.hand.find(gc => gc.instanceId === id) || player.getMonstersOnField().find(gc => gc.instanceId === id)
+        );
+        if (tributes.some(gc => !gc)) return false; // something named is no longer where it was
+
+        const totalLevel = tributes.reduce((sum, gc) => sum + (gc.card.level || 0), 0);
+        if (totalLevel < requiredLevel) {
+            this.addLog(`Not enough Levels selected (${totalLevel}/${requiredLevel}) — choose more Tribute material.`);
+            return false;
+        }
+
+        const ritualSpellName = this.ritualChoice.ritualSpellName;
+        this.state.awaitingRitualChoice = false;
+        this.ritualChoice = null;
+        this.completeRitualSummon(player, ritualMonster, tributes, ritualSpellName);
+        return true;
+    }
+
+    // Shared tail for both the AI's automatic path and the human's
+    // resolved choice — actually performs the Tribute + Summon once the
+    // materials are decided, whichever way they were decided.
+    completeRitualSummon(player, ritualMonster, tributes, ritualSpellName) {
         tributes.forEach(gc => player.moveCard(gc, gc.location, "graveyard"));
 
         player.moveCard(ritualMonster, "hand", "monster");
@@ -1012,8 +1286,26 @@ class MainGame {
         ritualMonster.state.hasBeenSummonedThisTurn = true;
 
         this.addLog(`${player.name} Ritual Summons ${ritualMonster.card.name}! (Tributed: ${tributes.map(t => t.card.name).join(", ")})`);
+        this.recordFieldEvent("ritual", ritualMonster, { tributedNames: tributes.map(t => t.card.name) });
+        this.enforceDragonCaptureJar(ritualMonster);
         this.checkForWinner();
-        return true;
+    }
+
+    // One card landing on the field, for the client to animate — a
+    // Normal/Set Summon, a Ritual Summon, a Spell/Trap being Set or
+    // activated, or a Flip effect triggering. One-shot: route/game.js
+    // reads and clears it on the very next render, same pattern as
+    // lastBattleEvent/lastRevealEvent just below.
+    recordFieldEvent(kind, gc, extra = {}) {
+        this.lastFieldEvent = {
+            kind, // "summon" | "set-monster" | "ritual" | "set-spelltrap" | "spell-activate" | "trap-activate" | "flip"
+            instanceId: gc.instanceId,
+            isPlayer1: gc.owner === this.player1,
+            cardName: gc.card.name,
+            cardImage: gc.card.image,
+            position: gc.position || null,
+            ...extra
+        };
     }
 
     // True if `player`currently controls a face-up monster on the field
@@ -1022,6 +1314,80 @@ class MainGame {
     controlsCard(player, cardName) {
         const target = Effects.normalize(cardName);
         return player.getMonstersOnField().some(m => m.faceUp && Effects.normalize(m.card.name) === target);
+    }
+
+    // Real tournament rules require a Deck search effect (Sangan, Witch
+    // of the Black Forest, ...) to reveal exactly which card it found to
+    // the opponent — this records that for the UI to show both players,
+    // not just log it as text. One-shot: route/game.js reads and clears
+    // it on the very next render, same as lastBattleEvent.
+    revealSearchedCard(player, gc) {
+        this.lastRevealEvent = {
+            playerName: player.name,
+            cardName: gc.card.name,
+            cardImage: gc.card.image,
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // UNION MONSTERS (Y-Dragon Head, Z-Metal Tank, ...) — a Union
+    // Monster can equip itself onto a valid host instead of staying an
+    // independent monster; while equipped it grants a stat boost and is
+    // destroyed in the host's place (see Player.moveCard). This is the
+    // generic mechanic; Effects.js supplies which cards/hosts/boosts.
+    // ------------------------------------------------------------------
+    equipUnionMonster(unionGc, hostGc, atkBoost, defBoost) {
+        const owner = unionGc.owner;
+        owner.removeCard(unionGc, "monster");
+        unionGc.location = "equipped";
+        unionGc.zoneIndex = null;
+        unionGc.unionAtkBoost = atkBoost;
+        unionGc.unionDefBoost = defBoost;
+        unionGc.state.hasUsedEffectThisTurn = true;
+        hostGc.equippedUnion = unionGc;
+        hostGc.modifiers.atk += atkBoost;
+        hostGc.modifiers.def += defBoost;
+        this.addLog(`${unionGc.card.name} equips onto ${hostGc.card.name} (+${atkBoost} ATK/+${defBoost} DEF)!`);
+    }
+
+    unequipUnionMonster(hostGc) {
+        const unionGc = hostGc.equippedUnion;
+        if (!unionGc) return false;
+        const owner = hostGc.owner;
+        if (unionGc.state.hasUsedEffectThisTurn) {
+            this.addLog(`${unionGc.card.name} has already used its effect this turn.`);
+            return false;
+        }
+        if (owner.getFreeMonsterSlot() === -1) {
+            this.addLog(`No free Monster Zone to Special Summon ${unionGc.card.name} back.`);
+            return false;
+        }
+        hostGc.equippedUnion = null;
+        hostGc.modifiers.atk -= (unionGc.unionAtkBoost || 0);
+        hostGc.modifiers.def -= (unionGc.unionDefBoost || 0);
+        unionGc.unionAtkBoost = 0;
+        unionGc.unionDefBoost = 0;
+        // BUGFIX: `owner` here is deliberately the HOST's *current*
+        // controller (hostGc.owner), not necessarily the Union
+        // Monster's original one — that's correct, since it needs to
+        // Special Summon itself wherever the host actually is right now
+        // (e.g. the host got taken under temporary control by Change of
+        // Heart/Enemy Controller since these two became equipped). But
+        // unionGc.owner is a property on the Union card's OWN object,
+        // separate from whatever zone.monster array it just got placed
+        // into — addCard() only updates .location/.zoneIndex, not
+        // .owner — so it needs to be set explicitly here too, or the
+        // card ends up physically sitting in one player's zone while
+        // still claiming to be owned by the other.
+        unionGc.owner = owner;
+        owner.addCard(unionGc, "monster");
+        unionGc.faceUp = true;
+        unionGc.position = "attack";
+        unionGc.state.hasBeenSummonedThisTurn = true;
+        unionGc.state.hasUsedEffectThisTurn = true;
+        this.addLog(`${unionGc.card.name} unequips from ${hostGc.card.name} and Special Summons itself!`);
+        this.checkForWinner();
+        return true;
     }
 
     // Sets any Spell or Trap face-down in the Spell/Trap Zone.
@@ -1037,12 +1403,19 @@ class MainGame {
         gc.turnSet = this.turn;
 
         this.addLog(`🂠 ${p.name} sets a card face-down in the Spell/Trap Zone.`);
+        // A face-down Spell/Trap Zone card looks identical whether it's a
+        // Spell or a Trap — neither player can tell which until it's
+        // activated. One unified event kind (never "spell-set" vs
+        // "trap-set") means that distinction can't leak through the
+        // animation even by accident, for either player's own Sets.
+        this.recordFieldEvent("set-spelltrap", gc);
         return true;
     }
 
-    // Activates a face-down Spell/Trap already on the field. `isResponse`
-    // indicates this is happening inside a Battle Response Window.
-    activateSetCard(gc, targetInstanceId = null, isResponse = false) {
+    // Activates a face-down Spell/Trap already on the field. `mode`
+    // is null (owner's own Main Phase), "battle" (inside a Battle
+    // Response Window), or "summon" (inside a Summon Response Window).
+    activateSetCard(gc, targetInstanceId = null, mode = null) {
         if (!gc || gc.location !== "spellTrap") return false;
 
         const meta = Effects.getMeta(gc.card.name);
@@ -1053,14 +1426,21 @@ class MainGame {
 
         const owner = gc.owner;
 
-        if (isResponse) {
+        if (mode === "battle") {
             if (!this.battleResponse || owner !== this.battleResponse.defender) return false;
             if (meta.window !== "response" && meta.window !== "anytime") return false;
+        } else if (mode === "summon") {
+            if (!this.summonResponse || owner !== this.summonResponse.defender) return false;
+            if (meta.window !== "summon" && meta.window !== "anytime") return false;
         } else {
             if (owner !== this.currentPlayer) return false;
             if (this.phase !== "m1" && this.phase !== "m2") return false;
             if (meta.window === "response") {
                 this.addLog(`${gc.card.name} can only be activated in response to an attack.`);
+                return false;
+            }
+            if (meta.window === "summon") {
+                this.addLog(`${gc.card.name} can only be activated in response to a Normal or Flip Summon.`);
                 return false;
             }
         }
@@ -1089,7 +1469,9 @@ class MainGame {
             }
         }
 
-        const target = this.resolveTarget(meta, targetInstanceId);
+        const target = (mode === "summon" && meta.window === "summon")
+            ? (this.summonResponse ? this.summonResponse.summonedGc : null)  // Trap Hole-style: implicit target is the monster that triggered this window, never player-chosen
+            : this.resolveTarget(meta, targetInstanceId);
         if (meta.needsTarget && !target) {
             this.addLog(`${gc.card.name} has no valid target and cannot be activated.`);
             return false;
@@ -1108,16 +1490,26 @@ class MainGame {
         }
 
         this.addLog(`${owner.name} activates the set card ${gc.card.name}!`);
+        this.recordFieldEvent(meta.kind === "trap" ? "trap-activate" : "spell-activate", gc, {
+            staysOnField: meta.subtype === "continuous" || meta.subtype === "equip" || meta.subtype === "field"
+        });
         this.lastDrawEvent = null;
         this.lastDiscardEvent = null;
+        this.lastDestroyEvent = null;
         Effects.activate(this, gc, target);
 
-        if (meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") {
+        // BUGFIX: same self-target guard as activateSpellFromHand above —
+        // e.g. Mystical Space Typhoon Set face-down, then activated
+        // targeting itself, would otherwise crash trying to move itself
+        // to the Graveyard twice.
+        if ((meta.subtype === "normal" || meta.subtype === "quickplay" || meta.subtype === "counter") && gc.location === "spellTrap") {
             owner.moveCard(gc, "spellTrap", "graveyard");
         }
 
-        if (isResponse) {
+        if (mode === "battle") {
             this.resolveBattleDamage();
+        } else if (mode === "summon") {
+            this.resolveSummonResponse();
         }
 
         this.checkForWinner();
@@ -1136,15 +1528,83 @@ class MainGame {
         this.state.waitingForAction = true;
     }
 
-    // Rulebook rule: if you have more than 6 cards in hand at the End
-    // Phase, discard down to 6. (Simplified: auto-discards the newest
-    // cards first — the real rule lets the player choose which to keep.)
-    enforceHandSizeLimit(player) {
-        while (player.zone.hand.length > 6) {
-            const card = player.zone.hand[player.zone.hand.length - 1];
-            player.moveCard(card, "hand", "graveyard");
-            this.addLog(`${player.name} discards ${card.card.name} (hand size limit of 6).`);
-        }
+    // Opens the End Phase hand-size discard window if `player` has more
+    // than 6 cards; returns true if it did (caller should wait for
+    // resolveDiscardChoice() rather than ending the turn immediately).
+    openDiscardChoice(player) {
+        const count = player.zone.hand.length - 6;
+        if (count <= 0) return false;
+        this.discardChoice = { player, count };
+        this.state.awaitingDiscardChoice = true;
+        // endActionWindow() (the only caller) already set waitingForAction
+        // false as its first line, same as every other phase transition —
+        // this window needs it back on so dispatch() will actually accept
+        // the DISCARD_CHOICE action once the player/AI responds.
+        this.state.waitingForAction = true;
+        this.addLog(`${player.name} must choose ${count} card${count > 1 ? "s" : ""} to discard (hand size limit of 6).`);
+        return true;
+    }
+
+    // `instanceIds` must name exactly discardChoice.count cards, all
+    // currently in discardChoice.player's hand.
+    resolveDiscardChoice(instanceIds) {
+        if (!this.state.awaitingDiscardChoice || !this.discardChoice) return false;
+        const { player, count } = this.discardChoice;
+        const ids = Array.isArray(instanceIds) ? [...new Set(instanceIds)] : [];
+        if (ids.length !== count) return false;
+        const cards = ids.map(id => player.zone.hand.find(gc => gc.instanceId === id));
+        if (cards.some(gc => !gc)) return false; // one of the ids wasn't actually in hand
+
+        cards.forEach(gc => player.moveCard(gc, "hand", "graveyard"));
+        this.addLog(`${player.name} discards ${cards.map(gc => gc.card.name).join(", ")}.`);
+
+        this.state.awaitingDiscardChoice = false;
+        this.discardChoice = null;
+        this.endTurn();
+        return true;
+    }
+
+    // Opens a "you choose Attack or Defense for each of these" window —
+    // used by Cyber Jar's Special Summons. The monsters are already on
+    // the field with a sensible heuristic default position by the time
+    // this is called (see the "cyber jar" handler in Effects.js); this
+    // only ever lets the controller revise that default, it never blocks
+    // anything from having already happened. Real per-effect-step
+    // suspension (the effect PAUSING mid-resolution to ask, the way the
+    // real game's priority system would) isn't something this engine's
+    // synchronous effect-resolution supports — this sidesteps that by
+    // never needing to pause: the field state is already fully valid the
+    // instant the effect finishes, and this window is purely optional
+    // revision layered on top.
+    openPositionChoice(player, instanceIds) {
+        const ids = (instanceIds || []).filter(id => this.findMonsterAnywhereOnField(id));
+        if (ids.length === 0) return false;
+        this.positionChoice = { player, instanceIds: ids };
+        this.state.awaitingPositionChoice = true;
+        this.state.waitingForAction = true;
+        this.addLog(`${player.name} may adjust the Attack/Defense Position of ${ids.length} newly Special Summoned monster${ids.length > 1 ? "s" : ""}.`);
+        return true;
+    }
+
+    // `overrides` is { instanceId: "attack" | "defense", ... } — only
+    // needs to name the ones actually being CHANGED from their current
+    // (heuristic-default) position; anything left unnamed just keeps it.
+    resolvePositionChoice(overrides) {
+        if (!this.state.awaitingPositionChoice || !this.positionChoice) return false;
+        const { player, instanceIds } = this.positionChoice;
+        instanceIds.forEach(id => {
+            const gc = this.findMonsterAnywhereOnField(id);
+            if (!gc) return; // destroyed/removed by something else in the meantime
+            const choice = overrides && overrides[id];
+            if (choice === "attack" || choice === "defense") {
+                gc.position = choice;
+                gc.faceUp = true; // Cyber Jar's Special Summons are always face-up, whichever position
+            }
+        });
+        this.addLog(`${player.name} confirms their Special Summoned monsters' positions.`);
+        this.state.awaitingPositionChoice = false;
+        this.positionChoice = null;
+        return true;
     }
 
     endTurn() {

@@ -25,6 +25,15 @@ const Effects = require("./Effects.js");
 // summoned? Compares its real (dynamic-stat-aware) ATK/DEF against the
 // strongest thing already on the opponent's field.
 function decideSummonPosition(game, gc) {
+    // Flip-effect monsters (Cyber Jar, Morphing Jar, Man-Eater Bug, Trap
+    // Master, ...) are worth almost nothing Normal Summoned face-up —
+    // the whole point of the card is the FLIP trigger, which only fires
+    // going from face-down to face-up. A competent player virtually
+    // always Sets these instead, either flipping them for value later
+    // or letting an attacker force the flip. Stat comparisons below
+    // don't even get a vote here.
+    if (Effects.getFlipEffect(gc.card.name)) return "defense";
+
     const opponent = game.opponentPlayer;
     const oppMonsters = opponent.getMonstersOnField();
     if (oppMonsters.length === 0) return "attack"; // nothing to worry about — go aggressive
@@ -47,8 +56,21 @@ function actMainPhase(game) {
     if (!game.state.actedThisWindow) {
         const summonable = p.zone.hand.filter(gc => game.canNormalSummon(gc));
         if (summonable.length > 0) {
+            // BUGFIX: must use getRequiredTributesForSummon here, not the
+            // raw getRequiredTributes(level) — the former folds in Cost
+            // Down's "-2 Levels this turn" and Soul Exchange's pre-paid
+            // credits, which is exactly what normalSummon()/setMonster()
+            // themselves check before accepting a summon. Using the raw,
+            // unadjusted level here can compute a DIFFERENT tribute count
+            // than what the engine actually requires (e.g. Cost Down
+            // turns a Level 8 needing 2 Tributes into a Level 6 needing
+            // only 1) — the mismatched tributeIndices.length then gets
+            // silently rejected by normalSummon(), and because dispatch()'s
+            // return value was never checked, the AI just kept reporting
+            // "acted: true" and retrying the exact same doomed summon
+            // forever every time this function was called again.
             const free = summonable
-                .filter(gc => game.getRequiredTributes(gc.card.level) === 0)
+                .filter(gc => game.getRequiredTributesForSummon(p, gc).required === 0)
                 .sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
 
             if (free) {
@@ -62,7 +84,7 @@ function actMainPhase(game) {
             }
 
             const big = summonable.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
-            const required = game.getRequiredTributes(big.card.level);
+            const required = game.getRequiredTributesForSummon(p, big).required;
             const occupied = p.zone.monster.map((s, i) => (s ? i : null)).filter(v => v !== null);
 
             if (occupied.length >= required) {
@@ -86,8 +108,16 @@ function actMainPhase(game) {
     });
     if (ignitionMonster) {
         const ign = Effects.getIgnition(ignitionMonster.card.name);
+        const unionInfo = Effects.getUnionInfo(ignitionMonster.card.name);
         let targetInstanceId = null;
-        if (ign.needsTarget === "spellTrap") {
+        if (unionInfo) {
+            // Union Monster equips: the target must be a valid host on the
+            // SAME side of the field, never the opponent's monster — the
+            // generic "grab the enemy's best monster" heuristic below is
+            // wrong here and would just fail forever.
+            const host = p.getMonstersOnField().find(m => !m.equippedUnion && unionInfo.hosts.includes(Effects.normalize(m.card.name)));
+            targetInstanceId = host ? host.instanceId : null;
+        } else if (ign.needsTarget === "spellTrap") {
             const enemy = p === game.player1 ? game.player2 : game.player1;
             const st = enemy.getSpellTrapsOnField()[0];
             targetInstanceId = st ? st.instanceId : null;
@@ -100,6 +130,23 @@ function actMainPhase(game) {
             game.dispatch({ type: "ACTIVATE_MONSTER_EFFECT", payload: { card: ignitionMonster, targetInstanceId } });
             return { acted: true, visible: true };
         }
+    }
+
+    // 1c) Cards like Spear Dragon get FORCED into Defense Position after
+    // they attack — but that's a one-turn side effect, not a strategic
+    // choice to sit back. On a later turn there's nothing stopping them
+    // from freely switching back to Attack Position (same rules as any
+    // other monster: once per turn, hasn't attacked/been Summoned this
+    // turn yet) — so unlike a monster genuinely walling for its DEF
+    // stat, there's no reason for the AI to leave it sitting there.
+    const strandedAttacker = p.getMonstersOnField().find(gc =>
+        gc.faceUp && gc.position === "defense" &&
+        Effects.forcedDefenseAfterAttack(gc.card.name) &&
+        game.canChangePosition(gc)
+    );
+    if (strandedAttacker) {
+        game.dispatch({ type: "CHANGE_POSITION", payload: { card: strandedAttacker } });
+        return { acted: true, visible: true };
     }
 
     // 2) Opportunistically set a Trap/Continuous Spell from hand if there's room.
@@ -165,10 +212,25 @@ function actBattlePhase(game) {
     const defenders = opponent.getMonstersOnField();
 
     if (defenders.length === 0) {
-        // No blockers — a direct attack is always safe. Lead with the
-        // biggest hitter, prioritizing lethal if it's on the table.
-        const lethal = attackers.find(a => game.getAtk(a) >= opponent.lifePoints);
-        const chosen = lethal || attackers.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
+        // No blockers — a direct attack is always safe... for anything
+        // that's actually allowed to declare one. BUGFIX: a monster like
+        // Spear Dragon can't declare a direct attack at all (Effects.
+        // cannotAttackDirectly); declareAttack correctly rejects that
+        // and leaves the game state untouched, but the old code here
+        // didn't filter such monsters out before picking its "biggest
+        // hitter" — so if that happened to be the only attacker (or the
+        // strongest one), the AI would call PASS-free advanceGame() into
+        // dispatching the exact same doomed attack every single step,
+        // forever, same "don't pick a move that can't work" pitfall the
+        // ignition-effect and battle-response code elsewhere in this
+        // file already guards against.
+        const directCapable = attackers.filter(a => !Effects.cannotAttackDirectly(a.card.name));
+        if (directCapable.length === 0) {
+            game.dispatch({ type: "PASS" });
+            return { acted: true, visible: false };
+        }
+        const lethal = directCapable.find(a => game.getAtk(a) >= opponent.lifePoints);
+        const chosen = lethal || directCapable.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
         game.dispatch({ type: "ATTACK", payload: { attacker: chosen, target: null } });
         return { acted: true, visible: true };
     }
@@ -268,12 +330,133 @@ function actBattleResponse(game) {
  * { acted, visible } — see file header. { acted: false } means there
  * was nothing for the AI to do right now (not its window).
  */
+// Called when the AI is the DEFENDER during a Summon Response Window
+// (Trap Hole-style "when your opponent Normal/Flip Summons..." traps).
+// Mirrors actBattleResponse, but the target is always the monster that
+// was just summoned — never a choice.
+function actSummonResponse(game) {
+    const defender = game.summonResponse.defender;
+    const summonedGc = game.summonResponse.summonedGc;
+
+    const eligible = game.getEligibleSummonResponses(defender).filter(gc => {
+        const meta = Effects.getMeta(gc.card.name);
+        if (meta.cost?.tributeMinAtk) {
+            return defender.getMonstersOnField().some(m => game.getAtk(m) >= meta.cost.tributeMinAtk);
+        }
+        if (meta.cost?.lp) {
+            return defender.lifePoints > meta.cost.lp;
+        }
+        // Trap Hole only actually does anything against a 1000+ ATK
+        // target — skip it otherwise rather than waste the card for
+        // nothing (same "don't pick a move that can't work" principle
+        // as the cost checks above).
+        if (Effects.normalize(gc.card.name) === "trap hole") {
+            return game.getAtk(summonedGc) >= 1000;
+        }
+        return true;
+    });
+
+    const priority = eligible[0];
+
+    if (!priority) {
+        game.dispatch({ type: "PASS_RESPONSE" });
+        return { acted: true, visible: false };
+    }
+
+    const meta = Effects.getMeta(priority.card.name);
+    let targetInstanceId = null;
+
+    if (meta.window === "summon") {
+        // Trap Hole-style: the implicit target IS the monster that
+        // triggered this window — never a separate choice.
+        targetInstanceId = summonedGc.instanceId;
+    } else if (meta.needsTarget === "monster") {
+        // An "anytime" trap (Spellbinding Circle, Shadow Spell, ...)
+        // being used in this window instead of its usual one — still
+        // needs its own real target, most naturally the monster that
+        // was just summoned if that's a legal target for it.
+        targetInstanceId = summonedGc.instanceId;
+    } else if (meta.needsTarget === "graveyardMonster") {
+        const gyMon = defender.zone.graveyard.find(m => game.isMonster(m));
+        targetInstanceId = gyMon ? gyMon.instanceId : null;
+    } else if (meta.needsTarget === "spellTrap") {
+        const enemy = defender === game.player1 ? game.player2 : game.player1;
+        const stCard = enemy.getSpellTrapsOnField()[0];
+        targetInstanceId = stCard ? stCard.instanceId : null;
+    }
+
+    if (meta.needsTarget && !targetInstanceId) {
+        game.dispatch({ type: "PASS_RESPONSE" });
+        return { acted: true, visible: false };
+    }
+
+    game.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card: priority, targetInstanceId } });
+    return { acted: true, visible: true };
+}
+
+// End Phase hand-size discard: keep monsters and anything with a real
+// programmed effect, discard the least useful cards first (vanilla/
+// no-effect cards, then lowest-ATK monsters) until at the limit.
+function actDiscardChoice(game) {
+    const { player, count } = game.discardChoice;
+    const scored = player.zone.hand.map(gc => {
+        let score = 0;
+        if (game.isMonster(gc)) score += 10 + (gc.card.atk || 0) / 100;
+        if (Effects.getEffectInfo(gc.card.name).tags.length > 0) score += 8;
+        return { gc, score };
+    });
+    scored.sort((a, b) => a.score - b.score); // discard the lowest-scoring cards first
+    const instanceIds = scored.slice(0, count).map(s => s.gc.instanceId);
+    game.dispatch({ type: "DISCARD_CHOICE", payload: { instanceIds } });
+    return { acted: true, visible: true };
+}
+
 function step(game) {
     if (game.gameOver) return { acted: false, visible: false };
 
     if (game.state.awaitingResponse) {
         if (game.battleResponse.defender === game.currentPlayer) return { acted: false, visible: false };
         return actBattleResponse(game);
+    }
+
+    if (game.state.awaitingSummonResponse) {
+        if (game.summonResponse.defender === game.currentPlayer) return { acted: false, visible: false };
+        return actSummonResponse(game);
+    }
+
+    if (game.state.awaitingDiscardChoice) {
+        return actDiscardChoice(game);
+    }
+
+    if (game.state.awaitingPositionChoice) {
+        // The AI never actually gets an interactive window for this today
+        // (see the comment in Effects.js's "cyber jar" handler for why) —
+        // this exists purely as a defensive fallback in case that ever
+        // changes. Its heuristic default from the effect handler is
+        // already reasonable, so just accept it as-is with no revisions.
+        game.dispatch({ type: "CONFIRM_POSITIONS", payload: { overrides: {} } });
+        return { acted: true, visible: false };
+    }
+
+    if (game.state.awaitingRitualChoice) {
+        // Same story as awaitingPositionChoice above — MainGame.
+        // ritualSummon only ever opens this window for Player 1, so this
+        // is a defensive fallback, not a path the AI actually takes
+        // today. Greedily pick the fewest, highest-Level candidates.
+        const { requiredLevel, candidateInstanceIds } = game.ritualChoice;
+        const candidates = candidateInstanceIds
+            .map(id => game.findMonsterAnywhereOnField(id) || game.currentPlayer.zone.hand.find(c => c.instanceId === id) || game.opponentPlayer.zone.hand.find(c => c.instanceId === id))
+            .filter(Boolean)
+            .sort((a, b) => (b.card.level || 0) - (a.card.level || 0));
+        const chosen = [];
+        let total = 0;
+        for (const gc of candidates) {
+            if (total >= requiredLevel) break;
+            chosen.push(gc.instanceId);
+            total += (gc.card.level || 0);
+        }
+        game.dispatch({ type: "RITUAL_TRIBUTE_CHOICE", payload: { instanceIds: chosen } });
+        return { acted: true, visible: false };
     }
 
     if (!game.state.waitingForAction) return { acted: false, visible: false };

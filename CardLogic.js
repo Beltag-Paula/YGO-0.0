@@ -31,6 +31,15 @@ class GameCard {
     constructor(card, owner) {
         this.card = card;
         this.owner = owner;
+        // The CURRENT controller — .owner gets reassigned by effects like
+        // Brain Control/Change of Heart/Enemy Controller (see
+        // MainGame.transferCard). originalOwner never changes once set:
+        // it's whoever's Deck this card actually started in, and real
+        // rules say the Graveyard/Hand/Deck/Extra Deck/Banished Zone it
+        // returns to when leaving the field is ALWAYS this player's, not
+        // whoever currently controls it — see Player.moveCard, which is
+        // where that distinction actually gets applied.
+        this.originalOwner = owner;
         
         // CRITICAL FIX: Unique instance tracking for duplicate cards; in case you get 3 copies of Blue Eyes White Dragon
         this.instanceId = `${card.id}_${Math.random().toString(36).substr(2, 9)}`;

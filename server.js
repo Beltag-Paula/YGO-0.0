@@ -28,11 +28,11 @@ app.use(express.json()); // Added to smoothly read incoming JSON payloads if nee
 // ORIGINAL BASE ROUTES (Preserved completely)
 // ---------------------------------------------------------
 app.get('/', (request, response) => {
-    response.render("index", { currentPage: 'home' });
+  response.render("index", { currentPage: 'home' });
 });
 
 app.get('/upload', (request, response) => {
-    response.render("upload", { currentPage: 'upload' });
+  response.render("upload", { currentPage: 'upload' });
 });
 
 app.post("/upload", upload.single("deck"), async (request, response) => {
@@ -47,8 +47,8 @@ app.post("/upload", upload.single("deck"), async (request, response) => {
 
     // Ensure the folder destination exists before trying to write files to it
     const inventoryDir = path.join(__dirname, "deck_inventory");
-    if (!fs.existsSync(inventoryDir)){
-        fs.mkdirSync(inventoryDir);
+    if (!fs.existsSync(inventoryDir)) {
+      fs.mkdirSync(inventoryDir);
     }
 
     const fileName = `deck_${Date.now()}.json`;
@@ -77,24 +77,24 @@ app.use("/game", gameRoutes);
 // Express routes synchronous throws in route handlers here automatically.
 // ---------------------------------------------------------
 app.use((err, req, res, next) => {
-    console.error("Unhandled error on", req.method, req.originalUrl, ":", err);
-    res.status(500).send(
-        `<html><body style="background:#111;color:#fff;font-family:sans-serif;padding:40px;">` +
-        `<h2>Something went wrong</h2>` +
-        `<p>An unexpected error occurred. The duel state is unaffected — you can go back and keep playing.</p>` +
-        `<p><a href="/game" style="color:#0cf;">Return to the duel</a></p>` +
-        `<pre style="color:#888;font-size:11px;white-space:pre-wrap;">${(err && err.stack) || err}</pre>` +
-        `</body></html>`
-    );
+  console.error("Unhandled error on", req.method, req.originalUrl, ":", err);
+  res.status(500).send(
+    `<html><body style="background:#111;color:#fff;font-family:sans-serif;padding:40px;">` +
+    `<h2>Something went wrong</h2>` +
+    `<p>An unexpected error occurred. The duel state is unaffected — you can go back and keep playing.</p>` +
+    `<p><a href="/game" style="color:#0cf;">Return to the duel</a></p>` +
+    `<pre style="color:#888;font-size:11px;white-space:pre-wrap;">${(err && err.stack) || err}</pre>` +
+    `</body></html>`
+  );
 });
 
 // ---------------------------------------------------------
 // SERVER SOCKET LISTENER (CRITICAL FIX: Syntax error cleared)
 // ---------------------------------------------------------
 app.listen(PORT, () => {
-    console.log(`\n==================================================`);
-    console.log(`YGO Duel Engine Server Online!`);
-    console.log(`Play Arena Mat: http://localhost:${PORT}/game/start`);
-    console.log(`Home Base View: http://localhost:${PORT}/`);
-    console.log(`==================================================\n`);
+  console.log(`\n==================================================`);
+  console.log(`👻👻👻👻👻 YGO Duel Engine Server Online!!!!!! 👻👻👻👻👻👻`);
+  console.log(`Play Arena Mat: http://localhost:${PORT}/game/start`);
+  console.log(`Home Base View: http://localhost:${PORT}/`);
+  console.log(`==================================================`);
 });

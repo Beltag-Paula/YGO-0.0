@@ -48,12 +48,55 @@ function decideSummonPosition(game, gc) {
     return "defense";
 }
 
+// The bot's answer when it has priority in a Chain: it only chains cards that
+// opt in with meta.aiUse (and, if targeting, can name a target).
+function actChain(game) {
+    const cw = game.chainWindow;
+    if (!cw) { game.passChain(); return { acted: true, visible: false }; }
+    const player = cw.player;
+    for (const gc of game.getChainResponses(player)) {
+        const meta = game.metaFor(gc);
+        if (!meta || !meta.aiUse) continue;
+        try { if (!meta.aiUse(game, gc)) continue; } catch (e) { continue; }
+        let tid = null;
+        if (meta.needsTarget) {
+            const t = meta.aiTarget ? customTarget(game, gc, meta) : null;
+            if (!t) continue;
+            tid = t.instanceId;
+        }
+        const before = game.chain.length;
+        game.dispatch({ type: gc.location === "hand" ? "ACTIVATE_SPELL" : "ACTIVATE_SET_CARD", payload: { card: gc, targetInstanceId: tid } });
+        if (game.chain.length !== before || !game.state.awaitingChain) return { acted: true, visible: true };
+    }
+    game.dispatch({ type: "PASS_RESPONSE" });
+    return { acted: true, visible: false };
+}
+
+// Script conditions may throw on odd boards; treat that as "can't".
+function condOk(game, gc, meta) {
+    try { return !meta.condition || !!meta.condition(game, gc); } catch (e) { return false; }
+}
+function worthUsing(game, gc, meta) {
+    try { return !meta.aiUse || !!meta.aiUse(game, gc); } catch (e) { return false; }
+}
+function customTarget(game, gc, meta) {
+    let t = null;
+    try { t = meta.aiTarget ? meta.aiTarget(game, gc) : null; } catch (e) { t = null; }
+    if (!t) return null;
+    // The hint may name something the rules forbid (an untargetable monster, a Lord of D. Dragon...):
+    // fall back to the best LEGAL target on the same side.
+    const legal = game.getTargetCandidates(gc, game.metaFor(gc) || meta) || [];
+    if (legal.includes(t)) return t;
+    const side = legal.filter(c => c.owner === t.owner);
+    return side.sort((x, y) => (game.isMonster(y) ? game.getAtk(y) : 0) - (game.isMonster(x) ? game.getAtk(x) : 0))[0] || null;
+}
+
 function actMainPhase(game) {
     const p = game.currentPlayer;
 
     // 1) Try to Normal Summon / Tribute Summon the best available monster,
     // in whichever position (Attack or Defense) makes sense right now.
-    if (!game.state.actedThisWindow) {
+    if (!game.state.actedThisWindow || game.summonMode(p) === "extra") {
         const summonable = p.zone.hand.filter(gc => game.canNormalSummon(gc));
         if (summonable.length > 0) {
             // BUGFIX: must use getRequiredTributesForSummon here, not the
@@ -85,7 +128,9 @@ function actMainPhase(game) {
 
             const big = summonable.sort((a, b) => game.getAtk(b) - game.getAtk(a))[0];
             const required = game.getRequiredTributesForSummon(p, big).required;
-            const occupied = p.zone.monster.map((s, i) => (s ? i : null)).filter(v => v !== null);
+            // weakest monsters first; Sheep Tokens (Scapegoat) can't be Tributed for a Tribute Summon
+            const occupied = p.zone.monster.map((s, i) => (s && !s.cannotBeTributed ? i : null)).filter(v => v !== null)
+                .sort((x, y) => game.getAtk(p.zone.monster[x]) - game.getAtk(p.zone.monster[y]));
 
             if (occupied.length >= required) {
                 const tributeIndices = occupied.slice(0, required);
@@ -152,6 +197,7 @@ function actMainPhase(game) {
     // 2) Opportunistically set a Trap/Continuous Spell from hand if there's room.
     const setCandidate = p.zone.hand.find(gc => {
         const meta = Effects.getMeta(gc.card.name);
+        if (meta && (meta.aiUse || meta.needsTarget === "custom") && meta.kind === "spell") return false; // scripted spells are played, not set
         return meta && (meta.kind === "trap" || meta.subtype === "continuous" || meta.subtype === "equip");
     });
     if (setCandidate && p.getFreeSpellTrapSlot() !== -1) {
@@ -162,7 +208,9 @@ function actMainPhase(game) {
     // 3) Cast an instant-effect Normal Spell if it looks useful.
     const instantSpell = p.zone.hand.find(gc => {
         const meta = Effects.getMeta(gc.card.name);
-        if (!meta || meta.kind !== "spell" || meta.subtype !== "normal" || meta.needsTarget) return false;
+        if (!meta || meta.kind !== "spell" || (meta.subtype !== "normal" && !meta.aiUse) || meta.needsTarget) return false;
+        if (!game.checkActivation(gc, "idle").ok) return false;
+        if (!condOk(game, gc, meta) || !worthUsing(game, gc, meta)) return false;
         // Ritual spells need a matching Ritual Monster + enough Tribute
         // Levels — skip them here rather than retrying a doomed
         // activation every loop (that would never mark actedThisWindow
@@ -174,6 +222,19 @@ function actMainPhase(game) {
     });
     if (instantSpell && p.getFreeSpellTrapSlot() !== -1) {
         game.dispatch({ type: "ACTIVATE_SPELL", payload: { card: instantSpell } });
+        return { acted: true, visible: true };
+    }
+
+    // 3b) Scripted spells that need a target the AI can pick (equips, GY targets...).
+    const targeted = p.zone.hand.map(gc => ({ gc, meta: Effects.getMeta(gc.card.name) })).find(({ gc, meta }) => {
+        if (!meta || meta.kind !== "spell" || meta.needsTarget !== "custom" || !meta.aiTarget) return false;
+        if (meta.window === "response") return false;
+        if (meta.cost?.lp && p.lifePoints <= meta.cost.lp) return false;
+        return game.checkActivation(gc, "idle").ok && condOk(game, gc, meta) && worthUsing(game, gc, meta) && !!customTarget(game, gc, meta);
+    });
+    if (targeted && p.getFreeSpellTrapSlot() !== -1) {
+        const t = customTarget(game, targeted.gc, targeted.meta);
+        game.dispatch({ type: "ACTIVATE_SPELL", payload: { card: targeted.gc, targetInstanceId: t.instanceId } });
         return { acted: true, visible: true };
     }
 
@@ -277,6 +338,9 @@ function actBattleResponse(game) {
 
     const eligible = game.getEligibleResponses(defender).filter(gc => {
         const meta = Effects.getMeta(gc.card.name);
+        if (!condOk(game, gc, meta)) return false;
+        if (meta.needsTarget === "custom" && !customTarget(game, gc, meta)) return false;
+        if (meta.aiUse && !worthUsing(game, gc, meta)) return false;
         // Skip anything whose activation cost the defender can't actually
         // pay right now — picking it anyway would fail every time this
         // function is called and spin forever.
@@ -314,6 +378,9 @@ function actBattleResponse(game) {
         const enemy = defender === game.player1 ? game.player2 : game.player1;
         const stCard = enemy.getSpellTrapsOnField()[0];
         targetInstanceId = stCard ? stCard.instanceId : null;
+    } else if (meta.needsTarget === "custom") {
+        const t = customTarget(game, priority, meta);
+        targetInstanceId = t ? t.instanceId : null;
     }
 
     if (meta.needsTarget && !targetInstanceId) {
@@ -322,6 +389,12 @@ function actBattleResponse(game) {
     }
 
     game.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card: priority, targetInstanceId } });
+    // If the activation was refused the window is still open: decline it,
+    // otherwise the AI would retry the same illegal activation forever.
+    if (game.state.awaitingSummonResponse || game.state.awaitingResponse) {
+        const stillSame = game.state.awaitingSummonResponse ? game.summonResponse : game.battleResponse;
+        if (stillSame && priority.location === "spellTrap" && !priority.faceUp) game.dispatch({ type: "PASS_RESPONSE" });
+    }
     return { acted: true, visible: true };
 }
 
@@ -340,6 +413,8 @@ function actSummonResponse(game) {
 
     const eligible = game.getEligibleSummonResponses(defender).filter(gc => {
         const meta = Effects.getMeta(gc.card.name);
+        if (!condOk(game, gc, meta)) return false;
+        if (meta.aiUse && !worthUsing(game, gc, meta)) return false;
         if (meta.cost?.tributeMinAtk) {
             return defender.getMonstersOnField().some(m => game.getAtk(m) >= meta.cost.tributeMinAtk);
         }
@@ -391,6 +466,12 @@ function actSummonResponse(game) {
     }
 
     game.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card: priority, targetInstanceId } });
+    // If the activation was refused the window is still open: decline it,
+    // otherwise the AI would retry the same illegal activation forever.
+    if (game.state.awaitingSummonResponse || game.state.awaitingResponse) {
+        const stillSame = game.state.awaitingSummonResponse ? game.summonResponse : game.battleResponse;
+        if (stillSame && priority.location === "spellTrap" && !priority.faceUp) game.dispatch({ type: "PASS_RESPONSE" });
+    }
     return { acted: true, visible: true };
 }
 
@@ -412,7 +493,29 @@ function actDiscardChoice(game) {
 }
 
 function step(game) {
-    if (game.gameOver) return { acted: false, visible: false };
+    if (game.state.awaitingChoice) {
+        const ch = game.choice;
+        if (ch.option) {
+            let id = ch.options[0].id;
+            try { if (ch.aiPick) id = ch.aiPick(game); } catch (e) { /* keep default */ }
+            game.resolveOption(id);
+            return { acted: true, visible: true };
+        }
+        // Generic card-effect choice: a card-provided hint wins, otherwise strongest/most useful first.
+        const score = gc => (game.isMonster(gc) ? (gc.card.atk || 0) + (gc.card.level || 0) * 10 : 5);
+        // Costs (discard, tribute) should shed the LEAST valuable card.
+        const cheapFirst = /discard|tribute|send|cost/i.test(ch.prompt || "");
+        let picked = null;
+        if (ch.aiPick) { try { picked = ch.aiPick(game, ch.candidates); } catch (e) { picked = null; } }
+        if (!picked) picked = ch.candidates.slice().sort((a, b) => cheapFirst ? score(a) - score(b) : score(b) - score(a)).slice(0, ch.max);
+        const ids = picked.slice(0, ch.max).map(c => c.instanceId);
+        if (ids.length < ch.min || !game.resolveChoice(ids)) {
+            if (ch.optional) game.cancelChoice(); else game.resolveChoice(ch.candidateIds.slice(0, ch.min));
+        }
+        return { acted: true, visible: true };
+    }
+
+    if (game.state.awaitingChain) return actChain(game);
 
     if (game.state.awaitingResponse) {
         if (game.battleResponse.defender === game.currentPlayer) return { acted: false, visible: false };
@@ -427,6 +530,7 @@ function step(game) {
     if (game.state.awaitingDiscardChoice) {
         return actDiscardChoice(game);
     }
+
 
     if (game.state.awaitingPositionChoice) {
         // The AI never actually gets an interactive window for this today

@@ -22,6 +22,16 @@ const Effects = require(path.join(ROOT, "Effects"));
 const GAMES = parseInt(process.argv[2] || "200", 10);
 const SEED0 = parseInt(process.argv[3] || "1", 10);
 const MODE = process.argv[4] || "mixed";
+// FUZZ_DECKS=all            -> every game uses a random pair of decks from deck_inventory/
+// FUZZ_DECKS=idA,idB        -> always that pair   (default: yugi vs kaiba)
+const DeckInventory = require(path.join(ROOT, "DeckInventory"));
+require(path.join(ROOT, "CardScripts")).loadAll();
+const DECK_SPEC = process.env.FUZZ_DECKS || "yugi,kaiba";
+const ALL_DECKS = DeckInventory.list().filter(d => !d.broken).map(d => d.id);
+function deckPair(g) {
+    if (DECK_SPEC === "all") return [ALL_DECKS[g % ALL_DECKS.length], ALL_DECKS[Math.floor(g / ALL_DECKS.length) % ALL_DECKS.length]];
+    return DECK_SPEC.split(",");
+}
 
 // ---- deterministic RNG so every failure is reproducible by seed ----
 let _s = 1;
@@ -32,6 +42,7 @@ function pick(a) { return a.length ? a[Math.floor(rnd() * a.length)] : undefined
 
 const problems = new Map(); // key -> {count, example}
 function report(kind, msg, ctx) {
+    if (process.env.FUZZ_TRACE && ctx && ctx.game && !report._shown) { report._shown = true; process.stderr.write("--- " + kind + ": " + msg + "\n" + ctx.game.log.slice(-14).join("\n") + "\nSTATE " + JSON.stringify(ctx.game.state) + " chain=" + ctx.game.chain.length + " window=" + (ctx.game.chainWindow ? ctx.game.chainWindow.player.name : null) + " sumResp=" + (ctx.game.summonResponse ? ctx.game.summonResponse.defender.name : null) + " eligible=" + (ctx.game.summonResponse ? ctx.game.getEligibleSummonResponses(ctx.game.summonResponse.defender).map(c=>c.card.name).join(",") : "") + "\n---\n"); }
     const key = kind + " :: " + msg.replace(/\d+/g, "#");
     const e = problems.get(key) || { count: 0, example: null };
     e.count++;
@@ -94,6 +105,13 @@ function checkInvariants(game, ctx) {
 function chaosStep(game, me) {
     const opp = me === game.player1 ? game.player2 : game.player1;
     // Response windows first
+    if (game.state.awaitingChoice) {
+        const ch = game.choice;
+        if (ch.option) return game.dispatch({ type: "CHOICE", payload: { optionId: ch.options[Math.floor(rnd() * ch.options.length)].id } });
+        if (ch.optional && rnd() < 0.2) return game.dispatch({ type: "CANCEL_CHOICE" });
+        const n = ch.min + Math.floor(rnd() * (ch.max - ch.min + 1));
+        return game.dispatch({ type: "CHOICE", payload: { instanceIds: shuffle(ch.candidateIds).slice(0, n) } });
+    }
     if (game.state.awaitingResponse) {
         const opts = game.getEligibleResponses(me);
         const hand = game.getEligibleHandResponses(me);
@@ -193,13 +211,15 @@ function drive(game, agents, ctx) {
     while (!game.gameOver && steps < 4000 && game.turn <= 60) {
         steps++;
         const cur = game.currentPlayer;
-        const sig = [game.turn, game.phase, game.state.waitingForAction, game.state.awaitingResponse, game.state.awaitingSummonResponse, game.state.awaitingDiscardChoice, game.state.awaitingPositionChoice, cur.zone.hand.length, cur.lifePoints, game.opponentPlayer.lifePoints, game.log.length].join("|");
+        const sig = [game.turn, game.phase, game.state.waitingForAction, game.state.awaitingResponse, game.state.awaitingSummonResponse, game.state.awaitingDiscardChoice, game.state.awaitingPositionChoice, game.state.awaitingChoice, cur.zone.hand.length, cur.lifePoints, game.opponentPlayer.lifePoints, game.log.length].join("|");
         if (sig === lastSig) { same++; } else { same = 0; lastSig = sig; }
         if (same > 60) { report("STUCK", `no state change for 60 steps in ${game.phase} (agent=${agentOf(agents, game)}) waiting=${game.state.waitingForAction} resp=${game.state.awaitingResponse}/${game.state.awaitingSummonResponse}/discard=${game.state.awaitingDiscardChoice}/position=${game.state.awaitingPositionChoice}`, ctx); return "stuck"; }
 
-        ctx.step = steps; ctx.turn = game.turn; ctx.phase = game.phase;
+        ctx.step = steps; ctx.turn = game.turn; ctx.phase = game.phase; ctx.game = game;
         try {
-            if (game.state.awaitingResponse) {
+            if (game.state.awaitingChoice) {
+                actor(agents, game, game.choice.player);
+            } else if (game.state.awaitingResponse) {
                 const def = game.battleResponse.defender;
                 actor(agents, game, def);
             } else if (game.state.awaitingSummonResponse) {
@@ -231,7 +251,9 @@ function actor(agents, game, player) {
         const res = AIController.step(game);
         if (!res.acted) {
             // fall back so we never stall on an AI that declines a window
-            if (game.state.awaitingDiscardChoice) {
+            if (game.state.awaitingChoice) {
+                const ch = game.choice; if (ch.option) game.resolveOption(ch.options[0].id); else if (ch.optional) game.cancelChoice(); else game.resolveChoice(ch.candidateIds.slice(0, ch.min));
+            } else if (game.state.awaitingDiscardChoice) {
                 const { count } = game.discardChoice;
                 const ids = player.zone.hand.slice(0, count).map(c => c.instanceId);
                 game.dispatch({ type: "DISCARD_CHOICE", payload: { instanceIds: ids } });
@@ -257,8 +279,10 @@ for (let g = 0; g < GAMES; g++) {
     let outcome;
     const ctx = { seed: sd };
     try {
-        const p1 = new Player("Yugi", JSON.parse(JSON.stringify(require(path.join(ROOT, "deck_inventory/yugi.json")))));
-        const p2 = new Player("Kaiba", JSON.parse(JSON.stringify(require(path.join(ROOT, "deck_inventory/kaiba.json")))));
+        const [d1, d2] = deckPair(g);
+        ctx.decks = `${d1} vs ${d2}`;
+        const p1 = new Player("P1", DeckInventory.readDeck(d1));
+        const p2 = new Player("P2", DeckInventory.readDeck(d2));
         const game = new MainGame(p1, p2);
         game.startDuel();
         const agents = new Map();
@@ -283,6 +307,6 @@ const sorted = [...problems.entries()].sort((a, b) => b[1].count - a[1].count);
 for (const [k, v] of sorted) {
     console.log(`x${String(v.count).padEnd(5)} ${k}`);
     const ex = v.example;
-    console.log(`        e.g. seed=${ex.seed} ${ex.agents || ""} turn=${ex.turn} phase=${ex.phase}${ex.stack ? "\n        " + ex.stack.replace(/\n/g, "\n        ") : ""}`);
+    console.log(`        e.g. seed=${ex.seed} ${ex.agents || ""} decks=${ex.decks || ""} turn=${ex.turn} phase=${ex.phase}${ex.stack ? "\n        " + ex.stack.replace(/\n/g, "\n        ") : ""}`);
 }
 process.exit(1);

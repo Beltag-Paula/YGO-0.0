@@ -987,10 +987,10 @@ function hasChainAttackOnDestroy(cardName) {
 // Lord of D. protects Dragon-Type monsters its controller owns from
 // being targeted by an OPPONENT's card (never its own controller's).
 function isProtectedByLordOfD(game, target, activatingPlayer) {
-    if (!target || (target.card.race || "") !== "Dragon") return false;
-    if (!activatingPlayer || activatingPlayer === target.owner) return false;
-    return target.owner.getSpellTrapsOnField().some(
-        c => c.faceUp && normalize(c.card.name) === "lord of d."
+    if (!target || (target.card.race || "") !== "Dragon" || target.location !== "monster") return false;
+    // "Neither player can target Dragon monsters on the field with card effects."
+    return [...game.player1.getMonstersOnField(), ...game.player2.getMonstersOnField()].some(
+        c => c.faceUp && !(c.modifiers && c.modifiers.effectsNegated) && normalize(c.card.name) === "lord of d."
     );
 }
 
@@ -1146,13 +1146,170 @@ function getEffectInfo(cardName) {
     } else if (asRitualMonster) {
         tags.push({ kind: "ritual", tag: "RIT", label: "Ritual Monster — can only be Ritual Summoned with its matching Ritual Spell, never Normal Summoned" });
     }
+    if (getHandIgnition(cardName)) tags.push({ kind: "handignition", tag: "HAND", label: "You can activate this card's effect from your hand during your Main Phase" });
+    if (CONTINUOUS_STATS[normalize(cardName)]) tags.push({ kind: "continuous", tag: "CONT", label: "Continuous effect — changes monsters' ATK/DEF while this card is face-up on the field" });
+    if (TRAP_NEGATERS.has(normalize(cardName))) tags.push({ kind: "continuous", tag: "CONT", label: "While face-up, Trap Cards cannot be activated" });
+    if (PASSIVE_NOTES[normalize(cardName)]) tags.push({ kind: "passive", tag: "PASS", label: PASSIVE_NOTES[normalize(cardName)] });
     if (tags.length === 0) {
         return { tags: [], summary: "No programmed effect yet — plays as a plain stat stick with no activatable ability." };
     }
     return { tags, summary: tags.map(t => t.label).join(" · ") };
 }
 
+
+// ------------------------------------------------------------------
+// EXTENDED SCRIPT TABLES (registered by scripts/*.js)
+// ------------------------------------------------------------------
+const ALT_TRIBUTES = {};          // name -> [extra tribute counts allowed for a Tribute Summon]
+const CONTINUOUS_STATS = {};      // name -> (game, source, target) => {atk, def} | null
+const ATTACK_COSTS = {};          // name -> { canPay(game, gc), pay(game, gc) }
+const SECOND_ATTACK = new Set();
+const TRAP_NEGATERS = new Set();
+const HAND_IGNITIONS = {};        // name -> { canActivate(game, gc), activate(game, gc) }
+const PASSIVE_NOTES = {};
+const NO_NORMAL_SUMMON = new Set();
+const DESTROY_PROTECTION = {};     // name -> (game, gc) => true if this Spell/Trap survives 'destruction' (Seal of Orichalcos)
+const DRAW_PHASE_TRIGGERS = {};    // name -> (game, gc, drawnCard): face-up cards reacting to the Draw Phase draw (Heart of the Underdog)
+const ATTACK_SHIELDS = {};         // name -> (game, src, target) => true if `target` can't be attacked (Seal of Orichalcos)
+const QUICK_EFFECTS = {};          // name -> monster Quick Effect usable in a Chain
+const UNTARGETABLE = new Set();    // monsters card effects cannot target (Obelisk)
+const NO_SUMMON_RESPONSE = new Set(); // Normal Summon can't be responded to (Slifer, Obelisk)
+const NO_SET = new Set();            // cannot be Normal Set (Slifer, Obelisk, Gilford ...)
+const TRIBUTE_OVERRIDES = {};       // name -> number of Tributes required (Slifer/Obelisk: 3)
+const DESTROY_REPLACEMENTS = {};   // name -> (game, gc) => true if it handled the 'destruction' itself
+const DIRECT_ATTACKERS = {};       // name -> { halve: bool }
+const PARTIAL_NOTES = {};         // name -> what is NOT implemented yet (card still counts as scripted, but flagged)         // name -> text, for cards whose passive is implemented in MainGame itself
+
+function altTributeCounts(cardName) { return ALT_TRIBUTES[normalize(cardName)] || []; }
+function getAttackCost(cardName) { return ATTACK_COSTS[normalize(cardName)] || null; }
+function hasSecondAttack(cardName) { return SECOND_ATTACK.has(normalize(cardName)); }
+function getHandIgnition(cardName) { return HAND_IGNITIONS[normalize(cardName)] || null; }
+
+function trapsNegated(game) {
+    return [...game.player1.getMonstersOnField(), ...game.player2.getMonstersOnField()].some(
+        m => m.faceUp && !(m.modifiers && m.modifiers.effectsNegated) && TRAP_NEGATERS.has(normalize(m.card.name))
+    );
+}
+
+// Every face-up card with a registered continuous stat effect (monsters on
+// the field or Spell/Trap Zone cards) contributes to `target`'s ATK/DEF.
+function continuousStatFor(game, target) {
+    let atk = 0, def = 0;
+    for (const p of [game.player1, game.player2]) {
+        const sources = [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()];
+        for (const src of sources) {
+            if (!src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) continue;
+            const fn = CONTINUOUS_STATS[normalize(src.card.name)];
+            if (!fn) continue;
+            const r = fn(game, src, target);
+            if (r) { atk += r.atk || 0; def += r.def || 0; }
+        }
+    }
+    return { atk, def };
+}
+
+// ------------------------------------------------------------------
+// SCRIPT REGISTRY — how scripts/*.js plug additional cards in without
+// touching the tables above. Every table is keyed by normalized name.
+// ------------------------------------------------------------------
+const Registry = {
+    spellTrap(name, meta, handler) {
+        const n = normalize(name);
+        SPELL_TRAP_META[n] = meta;
+        if (handler) HANDLERS[n] = handler;
+    },
+    flip(name, fn) { FLIP_EFFECTS[normalize(name)] = fn; },
+    onSummon(name, fn) { ON_SUMMON_EFFECTS[normalize(name)] = fn; },
+    ignition(name, def) { IGNITION_EFFECTS[normalize(name)] = def; },
+    gyTrigger(name, fn) { GY_TRIGGER_EFFECTS[normalize(name)] = fn; },
+    dynamic(name, fn) { DYNAMIC_STATS[normalize(name)] = fn; },
+    handResponse(name, def) { HAND_RESPONSE_EFFECTS[normalize(name)] = def; },
+    fusion(name, recipe) { FUSION_RECIPES[normalize(name)] = recipe; },
+    ritual(name, recipe) { RITUAL_RECIPES[normalize(name)] = recipe; },
+    piercing(name) { PIERCING_MONSTERS.add(normalize(name)); },
+    noDirect(name) { NO_DIRECT_ATTACK_MONSTERS.add(normalize(name)); },
+    altTributes(name, counts) { ALT_TRIBUTES[normalize(name)] = counts; },
+    continuous(name, fn) { CONTINUOUS_STATS[normalize(name)] = fn; },
+    attackCost(name, def) { ATTACK_COSTS[normalize(name)] = def; },
+    secondAttack(name) { SECOND_ATTACK.add(normalize(name)); },
+    trapNegater(name) { TRAP_NEGATERS.add(normalize(name)); },
+    handIgnition(name, def) { HAND_IGNITIONS[normalize(name)] = def; },
+    destroyReplacement(name, fn) { DESTROY_REPLACEMENTS[normalize(name)] = fn; },
+    directAttacker(name, info) { DIRECT_ATTACKERS[normalize(name)] = info || {}; },
+    noSet(name) { NO_SET.add(normalize(name)); },
+    tributesRequired(name, n) { TRIBUTE_OVERRIDES[normalize(name)] = n; },
+    quickEffect(name, def) { QUICK_EFFECTS[normalize(name)] = def; },
+    untargetable(name) { UNTARGETABLE.add(normalize(name)); },
+    noSummonResponse(name) { NO_SUMMON_RESPONSE.add(normalize(name)); },
+    destroyProtection(name, fn) { DESTROY_PROTECTION[normalize(name)] = fn; },
+    drawPhaseTrigger(name, fn) { DRAW_PHASE_TRIGGERS[normalize(name)] = fn; },
+    attackShield(name, fn) { ATTACK_SHIELDS[normalize(name)] = fn; },
+    noNormalSummon(name) { NO_NORMAL_SUMMON.add(normalize(name)); },
+    partial(name, note) { PARTIAL_NOTES[normalize(name)] = note || "Only part of the card text is implemented"; },
+    passive(name, note) { PASSIVE_NOTES[normalize(name)] = note || "Passive effect"; }
+};
+
+/** Which kinds of script exist for a card name (empty = no script). */
+function scriptKinds(cardName) {
+    const n = normalize(cardName);
+    const kinds = [];
+    if (SPELL_TRAP_META[n]) kinds.push(HANDLERS[n] ? "spelltrap" : "spelltrap-nohandler");
+    if (FLIP_EFFECTS[n]) kinds.push("flip");
+    if (ON_SUMMON_EFFECTS[n]) kinds.push("onsummon");
+    if (IGNITION_EFFECTS[n]) kinds.push("ignition");
+    if (GY_TRIGGER_EFFECTS[n]) kinds.push("gytrigger");
+    if (DYNAMIC_STATS[n]) kinds.push("dynamic");
+    if (HAND_RESPONSE_EFFECTS[n]) kinds.push("handresponse");
+    if (FUSION_RECIPES[n]) kinds.push("fusion");
+    if (RITUAL_RECIPES[n]) kinds.push("ritual");
+    if (UNION_MONSTERS[n]) kinds.push("union");
+    if (PIERCING_MONSTERS.has(n) || NO_DIRECT_ATTACK_MONSTERS.has(n) || PASSIVE_NOTES[n]) kinds.push("passive");
+    if (CONTINUOUS_STATS[n]) kinds.push("continuous");
+    if (ALT_TRIBUTES[n]) kinds.push("alt-tribute");
+    if (ATTACK_COSTS[n]) kinds.push("attack-cost");
+    if (SECOND_ATTACK.has(n)) kinds.push("second-attack");
+    if (TRAP_NEGATERS.has(n)) kinds.push("trap-negater");
+    if (HAND_IGNITIONS[n]) kinds.push("hand-ignition");
+    if (NO_NORMAL_SUMMON.has(n)) kinds.push("special-summon-only");
+    if (DESTROY_PROTECTION[n]) kinds.push("destroy-protection");
+    if (DRAW_PHASE_TRIGGERS[n]) kinds.push("draw-trigger");
+    if (ATTACK_SHIELDS[n]) kinds.push("attack-shield");
+    if (QUICK_EFFECTS[n]) kinds.push("quick-effect");
+    if (UNTARGETABLE.has(n)) kinds.push("untargetable");
+    if (NO_SUMMON_RESPONSE.has(n)) kinds.push("unnegatable-summon");
+    if (DESTROY_REPLACEMENTS[n]) kinds.push("destroy-replacement");
+    if (DIRECT_ATTACKERS[n]) kinds.push("direct-attacker");
+    if (PARTIAL_NOTES[n]) kinds.push("partial");
+    // The Ritual MONSTER is "scripted" through its Ritual Spell's recipe.
+    if (Object.values(RITUAL_RECIPES).some(r => normalize(r.summons) === n)) kinds.push("ritual-monster");
+    return kinds;
+}
+
+function getDestroyReplacement(cardName) { return DESTROY_REPLACEMENTS[normalize(cardName)] || null; }
+function getDirectAttacker(cardName) { return DIRECT_ATTACKERS[normalize(cardName)] || null; }
+function noSetMonster(cardName) { return NO_SET.has(normalize(cardName)); }
+function getTributeOverride(cardName, byLevel) { const o = TRIBUTE_OVERRIDES[normalize(cardName)]; return o === undefined ? byLevel : o; }
+function getQuickEffect(cardName) { return QUICK_EFFECTS[normalize(cardName)] || null; }
+function isUntargetable(cardName) { return UNTARGETABLE.has(normalize(cardName)); }
+function hasNoSummonResponse(cardName) { return NO_SUMMON_RESPONSE.has(normalize(cardName)); }
+function getDestroyProtection(cardName) { return DESTROY_PROTECTION[normalize(cardName)] || null; }
+function getDrawPhaseTrigger(cardName) { return DRAW_PHASE_TRIGGERS[normalize(cardName)] || null; }
+// Is `target` shielded from being attacked by any face-up card on the field?
+function isAttackShielded(game, target) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of p.getSpellTrapsOnField()) {
+            if (!src.faceUp) continue;
+            const fn = ATTACK_SHIELDS[normalize(src.card.name)];
+            if (fn && fn(game, src, target)) return true;
+        }
+    }
+    return false;
+}
+function cannotBeNormalSummoned(cardName) { return NO_NORMAL_SUMMON.has(normalize(cardName)); }
+function partialNote(cardName) { return PARTIAL_NOTES[normalize(cardName)] || null; }
+
 module.exports = {
+    getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,

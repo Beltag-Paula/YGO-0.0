@@ -1,0 +1,30 @@
+<div class="bg-rays"></div><div class="bg-grid"></div>
+<div class="topbar">
+  <a class="brand" href="/">YU-GI-OH! <small>DUEL SIMULATOR</small></a>
+  <nav class="nav">
+    <a href="/" class="<%= page==='home'?'on':'' %>">Home</a>
+    <a href="/duel" class="<%= page==='duel'?'on':'' %>">Solo Duel</a>
+    <a href="/decks" class="<%= page==='decks'?'on':'' %>">Deck Inventory</a>
+  </nav>
+</div>
+<div class="toast-host" id="toasts"></div>
+<script>
+  window.toast = function (msg, err) {
+    const h = document.getElementById('toasts'); const t = document.createElement('div');
+    t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; h.appendChild(t); setTimeout(() => t.remove(), 3600);
+  };
+  window.api = async function (url, opts) {
+    const r = await fetch(url, opts); let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.error) || ('Request failed (' + r.status + ')')); return j;
+  };
+  window.esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  window.deckCaseHTML = function (d, extra) {
+    const cov = d.script ? d.script.pct : null;
+    const cls = cov == null ? '' : cov >= 85 ? 'ok' : cov >= 50 ? 'mid' : 'low';
+    return '<div class="art" style="background-image:url(' + esc(d.cover ? d.cover.image : '') + ')"></div>' +
+      '<div class="badge-row"><span class="chip">' + d.counts.main + ' CARDS</span>' +
+      (cov == null ? '' : '<span class="chip ' + cls + '" title="Share of this deck\'s cards whose effects are scripted">FX ' + cov + '%</span>') + '</div>' +
+      '<div class="meta"><b>' + esc(d.name) + '</b><small>' + d.counts.monsters + ' Monsters · ' + d.counts.spells + ' Spells · ' + d.counts.traps + ' Traps' +
+      (d.counts.extra ? ' · ' + d.counts.extra + ' Extra' : '') + '</small></div>';
+  };
+</script>

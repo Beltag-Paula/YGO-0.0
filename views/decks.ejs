@@ -1,0 +1,75 @@
+<!DOCTYPE html><html lang="en"><head><title>Deck Inventory</title><%- include('partials/head') %></head>
+<body><div class="page">
+<%- include('partials/nav', { page }) %>
+<h1 class="title">Deck Inventory</h1>
+<p class="sub">Every deck in <code>deck_inventory/</code>. “FX” is the share of the deck's cards whose effects are scripted in the engine.</p>
+<div class="deck-layout">
+  <div class="deck-grid" id="grid"></div>
+  <div class="panel panel-pad detail" id="detail"><p class="sub">Select a deck to see its cards.</p></div>
+</div>
+
+<div class="modal-back" id="uploadModal"><div class="panel modal">
+  <h3>Upload a .ydk deck</h3>
+  <div class="field"><label>Deck name (optional)</label><input type="text" id="upName" maxlength="60" placeholder="Defaults to the file name"></div>
+  <div class="field"><label>.ydk file</label><input type="file" id="upFile" accept=".ydk"></div>
+  <div class="row-end"><button class="btn ghost small" id="upCancel">Cancel</button><button class="btn small" id="upGo">Upload</button></div>
+</div></div>
+
+<div class="modal-back" id="renameModal"><div class="panel modal">
+  <h3>Rename deck</h3>
+  <div class="field"><input type="text" id="rnName" maxlength="60"></div>
+  <div class="row-end"><button class="btn ghost small" id="rnCancel">Cancel</button><button class="btn small" id="rnGo">Save</button></div>
+</div></div>
+
+<script>
+let decks = [], sel = null;
+const $ = id => document.getElementById(id);
+async function load() {
+  decks = (await api('/api/decks')).decks;
+  const g = $('grid'); g.innerHTML = '';
+  decks.forEach(d => {
+    const el = document.createElement('div'); el.className = 'deck-case' + (sel === d.id ? ' sel' : '');
+    el.innerHTML = deckCaseHTML(d); el.onclick = () => { sel = d.id; load(); showDetail(d.id); }; g.appendChild(el);
+  });
+  const add = document.createElement('div'); add.className = 'deck-case add'; add.id = 'upload';
+  add.innerHTML = '<div><div class="plus">+</div><b style="letter-spacing:.12em">UPLOAD DECK</b></div>'; add.onclick = () => $('uploadModal').classList.add('on'); g.appendChild(add);
+  if (!sel && decks[0]) { sel = decks[0].id; load(); showDetail(sel); }
+}
+async function showDetail(id) {
+  const d = await api('/api/decks/' + encodeURIComponent(id)); const sum = decks.find(x => x.id === id) || {};
+  const rows = list => list.map(c => '<div class="card-row"><img src="' + esc(c.image || '') + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">' +
+    '<div><div class="n">' + esc(c.name) + '</div><div class="t">' + esc(c.type) + (c.level ? ' · Lv ' + c.level : '') + (c.atk != null ? ' · ' + c.atk + '/' + (c.def ?? '?') : '') + '</div></div>' +
+    '<span class="s ' + c.script.status + '" title="' + esc(c.script.note || c.script.kinds.join(', ') || '') + '">' + ({vanilla:'VANILLA',scripted:'SCRIPTED',partial:'PARTIAL',stub:'NO SCRIPT'})[c.script.status] + '</span><span class="x">×' + c.copies + '</span></div>').join('');
+  const cov = sum.script;
+  $('detail').innerHTML =
+    '<h2>' + esc(d.name) + '</h2><div class="sub" style="margin:0">' + d.counts.main + ' main · ' + d.counts.extra + ' extra · ' + d.counts.side + ' side</div>' +
+    '<div class="stats">' + (cov ? '<span class="chip ' + (cov.pct >= 85 ? 'ok' : cov.pct >= 50 ? 'mid' : 'low') + '">' + cov.pct + '% SCRIPTED (' + (cov.vanilla + cov.scripted + cov.partial) + '/' + cov.total + ')</span>' : '') +
+    (d.warnings || []).map(w => '<span class="chip low">' + esc(w) + '</span>').join('') + '</div>' +
+    '<div class="row-end" style="justify-content:flex-start;margin:0 0 6px"><a class="btn small" href="/duel?deck=' + encodeURIComponent(id) + '">Duel with this</a>' +
+    '<button class="btn ghost small" onclick="rename()">Rename</button><button class="btn danger small" onclick="del()">Delete</button></div>' +
+    '<div class="sec">MAIN DECK</div><div class="card-list">' + rows(d.main) + '</div>' +
+    (d.extra.length ? '<div class="sec">EXTRA DECK</div><div class="card-list">' + rows(d.extra) + '</div>' : '') +
+    (d.side.length ? '<div class="sec">SIDE DECK</div><div class="card-list">' + rows(d.side) + '</div>' : '');
+}
+function rename() { const d = decks.find(x => x.id === sel); $('rnName').value = d ? d.name : ''; $('renameModal').classList.add('on'); }
+$('rnCancel').onclick = () => $('renameModal').classList.remove('on');
+$('rnGo').onclick = async () => {
+  try { await api('/api/decks/' + sel, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: $('rnName').value }) });
+    $('renameModal').classList.remove('on'); await load(); showDetail(sel); } catch (e) { toast(e.message, true); }
+};
+async function del() {
+  const d = decks.find(x => x.id === sel); if (!d || !confirm('Delete "' + d.name + '" permanently?')) return;
+  try { await api('/api/decks/' + sel, { method: 'DELETE' }); sel = null; $('detail').innerHTML = '<p class="sub">Select a deck to see its cards.</p>'; await load(); toast('Deck deleted'); }
+  catch (e) { toast(e.message, true); }
+}
+$('upCancel').onclick = () => $('uploadModal').classList.remove('on');
+$('upGo').onclick = async () => {
+  const f = $('upFile').files[0]; if (!f) return toast('Choose a .ydk file first', true);
+  const fd = new FormData(); fd.append('name', $('upName').value); fd.append('deck', f);
+  $('upGo').disabled = true; $('upGo').textContent = 'Uploading…';
+  try { const r = await api('/api/decks', { method: 'POST', body: fd }); $('uploadModal').classList.remove('on'); sel = r.id; toast(r.message); await load(); showDetail(sel); }
+  catch (e) { toast(e.message, true); } finally { $('upGo').disabled = false; $('upGo').textContent = 'Upload'; }
+};
+load().then(() => { if (location.hash === '#upload') $('uploadModal').classList.add('on'); });
+</script>
+</div></body></html>

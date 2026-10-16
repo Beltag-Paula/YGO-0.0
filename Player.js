@@ -3,7 +3,13 @@ const { buildDeckForPlayer } = require("./deckBuilder");
 class Player {
   constructor(name, deckJson) {
     this.name = name;
-    this.lifePoints = 8000;
+    this._lp = 8000;
+    // Set by MainGame's constructor. Lets the Player report state
+    // changes (LP, card movement) to the duel's event stream so the UI
+    // can animate them without every card effect having to know about it.
+    this.game = null;
+    // Optional display info (avatar, deck name) supplied by the session.
+    this.profile = {};
 
     this.zone = {
       hand: [],
@@ -33,6 +39,17 @@ class Player {
     this.zone.sideDeck.forEach(gc => { gc.location = "sideDeck"; gc.zoneIndex = null; });
 
     this.normalSummonedThisTurn = false;
+    this.extraNormalSummons = 0;
+  }
+
+  get lifePoints() { return this._lp; }
+  set lifePoints(v) {
+    const next = Math.max(0, Math.round(Number(v) || 0));
+    const prev = this._lp;
+    this._lp = next;
+    if (this.game && prev !== next) {
+      this.game.emit("lp", { player: this.game.indexOf(this), from: prev, to: next });
+    }
   }
 
   shuffleDeck() {
@@ -93,12 +110,22 @@ class Player {
     return this.zone.monster.filter(slot => slot !== null);
   }
 
+  // Every Spell/Trap card on the field: the five Spell & Trap Zones plus the Field Zone.
   getSpellTrapsOnField() {
-    return this.zone.spellTrap.filter(slot => slot !== null);
+    const cards = this.zone.spellTrap.filter(slot => slot !== null);
+    if (this.zone.field) cards.push(this.zone.field);
+    return cards;
   }
 
   // CRITICAL FIX: Safe Zone Appending & Index Management
   addCard(card, zoneName) {
+    if (zoneName === "field") {
+      // The Field Zone holds exactly one card; callers replace the old one first.
+      this.zone.field = card;
+      card.zoneIndex = null;
+      card.location = "field";
+      return;
+    }
     const zone = this.getZone(zoneName);
 
     if (this.isSlotZone(zoneName)) {
@@ -121,6 +148,11 @@ class Player {
 
   // CRITICAL FIX: Uses instanceId for exact tracking and cleans up states safely
   removeCard(card, zoneName) {
+    if (zoneName === "field") {
+      if (this.zone.field !== card) throw new Error(`Card ${card.card.name} not found in field`);
+      this.zone.field = null;
+      return card;
+    }
     const zone = this.getZone(zoneName);
 
     if (this.isSlotZone(zoneName)) {
@@ -140,6 +172,29 @@ class Player {
 
   // CRITICAL FIX: Encapsulated atomic transaction to ensure references remain clean
   moveCard(card, fromZone, toZone) {
+    const g = this.game;
+    // "If this face-up card is destroyed in a Monster Zone, place it in the
+    // Spell & Trap Zone instead" (Crystal Beasts and similar). Tributes are not
+    // destruction, so they set _noReplace first.
+    if (g && toZone === "graveyard" && card.faceUp && !card._noReplace) {
+      const FX = require("./Effects");
+      const rep = fromZone === "monster" ? FX.getDestroyReplacement(card.card.name)
+        : (fromZone === "spellTrap" || fromZone === "field") ? FX.getDestroyProtection(card.card.name) : null;
+      if (rep && rep(g, card)) return;
+    }
+    card._noReplace = false;
+    const before = g ? { id: card.instanceId, name: card.card.name, from: fromZone, fromOwner: g.indexOf(card.owner), fromIndex: card.zoneIndex } : null;
+    this._moveCardInner(card, fromZone, toZone);
+    if (g && before) {
+      g.emit("move", {
+        id: before.id, name: before.name, from: before.from, to: card.location,
+        fromOwner: before.fromOwner, toOwner: g.indexOf(card.owner),
+        destroyed: toZone === "graveyard" && (fromZone === "monster" || fromZone === "spellTrap")
+      });
+    }
+  }
+
+  _moveCardInner(card, fromZone, toZone) {
     // Union Monster protection (Y-Dragon Head, Z-Metal Tank, ...): a
     // monster with an equipped Union card is destroyed IN ITS PLACE —
     // the Union card goes to the Graveyard instead, the host stays on
@@ -215,8 +270,8 @@ class Player {
     // this same GameCard object, even once it's back on the field as a
     // "fresh" summon. Equip/link bookkeeping on Spell/Trap cards is
     // stale data past this point too.
-    const leavingField = (fromZone === "monster" || fromZone === "spellTrap") &&
-      toZone !== "monster" && toZone !== "spellTrap";
+    const onField = z => z === "monster" || z === "spellTrap" || z === "field";
+    const leavingField = onField(fromZone) && !onField(toZone);
     if (leavingField) {
       // Fires whatever this Spell/Trap's own "when this card leaves the
       // field..." rule requires (freeing the monster it was binding —
@@ -263,6 +318,13 @@ class Player {
   // Applies battle/effect damage, clamped so LP never goes negative
   dealDamage(amount) {
     if (amount <= 0) return this.lifePoints;
+    // Crush Card Virus: no damage at all until the end of the next turn.
+    if (this.game && this.game.noDamage && this.game.noDamage.player === this && this.game.turn <= this.game.noDamage.untilTurn) return this.lifePoints;
+    // Rainbow Life: this turn, damage is gained as Life Points instead.
+    if (this.game && this.game.lifeGainInstead === this && this.game.lifeGainTurn === this.game.turn) {
+      this.lifePoints = this.lifePoints + amount;
+      return this.lifePoints;
+    }
     this.lifePoints = Math.max(0, this.lifePoints - amount);
     return this.lifePoints;
   }
@@ -276,6 +338,7 @@ class Player {
       gc.state.hasBeenSummonedThisTurn = false;
       gc.state.hasChangedPositionThisTurn = false;
       gc.state.hasUsedEffectThisTurn = false;
+      gc.state.usedSecondAttack = false;
       // A Union Monster (Y-Dragon Head, Z-Metal Tank, ...) currently
       // equipped onto this card isn't itself sitting in zone.monster,
       // so it needs its own turn-flag reset here too.

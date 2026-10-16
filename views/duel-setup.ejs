@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="en"><head><title>Solo Duel</title><%- include('partials/head') %></head>
+<body><div class="page">
+<%- include('partials/nav', { page }) %>
+<h1 class="title">Solo Duel</h1>
+<p class="sub">Choose the deck you will play and the deck the bot will play.</p>
+<div class="vs-wrap">
+  <div class="vs-col"><h2>YOUR DECK</h2><div class="pick-grid" id="mine"></div><div class="panel selected-bar" id="mineBar"></div></div>
+  <div class="vs-badge">VS</div>
+  <div class="vs-col opp"><h2>OPPONENT'S DECK</h2><div class="pick-grid" id="theirs"></div><div class="panel selected-bar" id="theirBar"></div></div>
+</div>
+<div class="setup-footer">
+  <div><div class="sub" style="margin:0 0 6px;font-size:12px">TURN ORDER</div>
+    <div class="seg" id="first"><button data-v="random" class="on">Random</button><button data-v="you">I go first</button><button data-v="bot">Bot first</button></div></div>
+  <div style="flex:1"></div>
+  <span class="warn" id="warn"></span>
+  <button class="btn gold" id="go">Start Duel</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let decks = [], mine = null, theirs = 'random', first = 'random';
+const params = new URLSearchParams(location.search);
+function caseEl(d, kind) {
+  const el = document.createElement('div'); el.className = 'deck-case' + ((kind === 'mine' ? mine : theirs) === d.id ? ' sel' + (kind === 'theirs' ? ' opp' : '') : '');
+  el.innerHTML = d.id === 'random' ? '<div class="art" style="background:radial-gradient(circle at 50% 40%,#2f7fd6,#07142c)"></div><div class="meta"><b>Random Deck</b><small>Bot picks any deck</small></div>' : deckCaseHTML(d);
+  el.onclick = () => { if (kind === 'mine') mine = d.id; else theirs = d.id; paint(); }; return el;
+}
+function bar(el, id, label) {
+  const d = decks.find(x => x.id === id);
+  el.innerHTML = '<span class="who">' + label + '</span>' + (id === 'random' ? '<span>Random deck from your inventory</span>' :
+    d ? '<span>' + esc(d.name) + ' — ' + d.counts.main + ' cards' + (d.script ? ' · ' + d.script.pct + '% scripted' : '') + '</span>' : '<span>Nothing selected</span>');
+}
+function paint() {
+  const m = $('mine'), t = $('theirs'); m.innerHTML = t.innerHTML = '';
+  decks.forEach(d => { m.appendChild(caseEl(d, 'mine')); t.appendChild(caseEl(d, 'theirs')); });
+  t.insertBefore(caseEl({ id: 'random' }, 'theirs'), t.firstChild);
+  bar($('mineBar'), mine, 'YOU'); bar($('theirBar'), theirs, 'BOT');
+  const d = decks.find(x => x.id === mine); const warns = [];
+  if (d && d.counts.main < 40) warns.push('Your deck has fewer than 40 cards.');
+  const lowFx = [d, decks.find(x => x.id === theirs)].filter(x => x && x.script && x.script.pct < 50);
+  if (lowFx.length) warns.push('Some cards in a selected deck have no script yet — they play as plain cards.');
+  $('warn').textContent = warns.join(' '); $('go').disabled = !mine;
+}
+document.querySelectorAll('#first button').forEach(b => b.onclick = () => { first = b.dataset.v; document.querySelectorAll('#first button').forEach(x => x.classList.toggle('on', x === b)); });
+$('go').onclick = async () => {
+  $('go').disabled = true; $('go').textContent = 'Shuffling…';
+  try {
+    localStorage.setItem('ygo.mine', mine); localStorage.setItem('ygo.theirs', theirs);
+    await api('/api/duel/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playerDeck: mine, botDeck: theirs, first }) });
+    location.href = '/duel/play';
+  } catch (e) { toast(e.message, true); $('go').disabled = false; $('go').textContent = 'Start Duel'; }
+};
+(async () => {
+  decks = (await api('/api/decks')).decks.filter(d => !d.broken);
+  const ls = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const pick = id => decks.find(d => d.id === id) ? id : null;
+  mine = pick(params.get('deck')) || pick(ls('ygo.mine')) || (decks[0] && decks[0].id);
+  const lt = ls('ygo.theirs'); theirs = lt === 'random' || pick(lt) ? lt : 'random';
+  paint();
+})();
+</script>
+</div></body></html>

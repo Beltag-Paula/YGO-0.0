@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 """
+NOTE (read me first)
+--------------------
+This generator produces card_database/CardEffectsDB.js: a *data* file with
+one entry per card (metadata + effect text + a stub handler for effects it
+could not translate). The duel engine does NOT execute those stubs.
+
+Card behaviour that actually runs in a duel lives in ../scripts/*.js and is
+registered through Effects.Registry (see ../CardScripts.js). To see which
+cards in yugioh_cards.jsonl, and in your decks, have a real script:
+
+    node tools/coverage.js --write      # rewrites CARD_COVERAGE_REPORT.md
+    npm test                            # every script has tests in ../tests/
+
+Re-running this generator is only needed if yugioh_cards.jsonl changes.
+"""
+"""
 generate_card_db.py
 
 Reads yugioh_cards.jsonl (ygopro/EDOPro-format card metadata + official

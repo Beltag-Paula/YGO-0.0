@@ -1,0 +1,12 @@
+<!DOCTYPE html><html lang="en"><head><title>Yu-Gi-Oh! Duel Simulator</title><%- include('partials/head') %></head>
+<body><div class="page">
+<%- include('partials/nav', { page }) %>
+<div class="hero">
+  <h1>DUEL</h1><p>CHOOSE YOUR DECK · FACE THE BOT</p>
+</div>
+<div class="menu-tiles">
+  <a class="tile" href="/duel" style="--art:url(/images/Kaiba-MDDG.png)"><div class="tile-body"><b>Solo Duel</b><span>Pick your deck and your opponent's deck</span></div></a>
+  <a class="tile" href="/decks" style="--art:url(/images/YamiYugi-MDDG.png)"><div class="tile-body"><b>Deck Inventory</b><span>Browse, rename and delete your decks</span></div></a>
+  <a class="tile" href="/decks#upload"><div class="tile-body"><b>Upload Deck</b><span>Import a .ydk file into your inventory</span></div></a>
+</div>
+</div></body></html>

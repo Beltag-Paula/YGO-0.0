@@ -1,0 +1,2557 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Yu-Gi-Oh Duel Arena</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      background: radial-gradient(ellipse at center, #14100a 0%, #05040a 70%, #000000 100%);
+      color: #dbe9ff;
+      font-family: 'Rajdhani', 'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif;
+      margin: 0;
+      padding: 10px;
+      padding-bottom: 70px;
+    }
+    /* GX Tag Force-style HUD type: a condensed, slightly futuristic
+       display face for names/LP/phase text, distinct from the readable
+       body font used for card text. */
+    .top-header .header-name, .top-header .header-lp, .top-header .header-turn .turn-num,
+    .lp-bar .name, .lp-bar .lp-value, .phase-icon, .duel-log-title, .preview-name {
+      font-family: 'Orbitron', 'Consolas', monospace;
+    }
+    .arena {
+      display: flex;
+      max-width: 1400px;
+      margin: 0 auto;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    /* ============ PHASE ICONS (rendered inside the horizontal
+       .phase-pill-bar on the field midline) ============ */
+    .phase-icon {
+      background: linear-gradient(180deg, #2a2110, #16130a);
+      border: 2px solid #a9862f;
+      border-radius: 6px;
+      color: #c9a856;
+      font-weight: bold;
+      font-size: 12px;
+      text-align: center;
+      padding: 10px 2px;
+      letter-spacing: 1px;
+    }
+    .phase-icon.active {
+      background: linear-gradient(180deg, #ffd75e, #b8860b);
+      border-color: #fff3c4;
+      color: #241800;
+      box-shadow: 0 0 12px rgba(255,215,94,0.8);
+    }
+    /* Blue = your turn, red = opponent's — so the current phase color
+       alone tells you whose turn it is at a glance. */
+    .phase-icon.active.opp-turn {
+      background: linear-gradient(180deg, #ff4444, #aa1111);
+      border-color: #ffaaaa;
+      color: #200404;
+      box-shadow: 0 0 12px rgba(255,68,68,0.7);
+    }
+    .phase-icon-btn {
+      width: 100%;
+      font-family: inherit;
+      cursor: pointer;
+      animation: phasePulse 1.4s ease-in-out infinite;
+    }
+    .phase-icon-btn.opp-turn { animation: phasePulseRed 1.4s ease-in-out infinite; }
+    .phase-icon-btn:hover { box-shadow: 0 0 18px rgba(255,204,0,0.8); }
+    @keyframes phasePulse {
+      0%, 100% { box-shadow: 0 0 12px rgba(0,212,255,0.7); }
+      50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); }
+    }
+    @keyframes phasePulseRed {
+      0%, 100% { box-shadow: 0 0 12px rgba(255,68,68,0.7); }
+      50% { box-shadow: 0 0 20px rgba(255,204,0,0.6); }
+    }
+    /* A future phase you can jump straight to — clickable, but visually
+       distinct from the pulsing "current phase, click to pass" button. */
+    .phase-icon-jump {
+      background: linear-gradient(180deg, #1a3a5c, #0d2036);
+      border: 2px dashed #5a90bf;
+      color: #aed8ff;
+      animation: none;
+    }
+    .phase-icon-jump:hover {
+      border-color: #ffcc00;
+      color: #ffcc00;
+      box-shadow: 0 0 14px rgba(255,204,0,0.5);
+    }
+
+    /* ============ CENTER: FIELD ============ */
+    .field-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .lp-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(90deg, #16130a, #2a2210 60%, transparent);
+      border: 1px solid #a9862f;
+      border-radius: 10px;
+      padding: 3px 18px;
+      height: 10px;
+      box-shadow: 0 0 10px rgba(212,175,55,0.25), inset 0 0 12px rgba(0,0,0,0.4);
+    }
+    .lp-bar { position: relative; overflow: hidden; }
+    .lp-gauge-track {
+      position: absolute; left: 0; top: 0; bottom: 0; right: 0;
+      background: rgba(0,0,0,0.35); z-index: 0;
+    }
+    .lp-gauge-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: linear-gradient(90deg, #1fae4a, #6fe08a);
+      transition: width 0.6s ease-out;
+      opacity: 0.7;
+      box-shadow: 0 0 10px rgba(111,224,138,0.6);
+    }
+    .lp-gauge-fill.opp { background: linear-gradient(90deg, #6fe08a, #1fae4a); box-shadow: 0 0 10px rgba(111,224,138,0.6); }
+    .lp-bar .name, .lp-bar .lp-value, .lp-bar .arrow, .lp-bar .floating-damage { position: relative; z-index: 1; }
+    .lp-bar .name { font-weight: bold; font-size: 15px; color: #ffdf8e; text-shadow: 0 0 4px rgba(0,0,0,0.8); }
+    .lp-bar .lp-value { font-size: 26px; font-weight: bold; color: #ffe9a8; text-shadow: 0 0 8px rgba(255,204,0,0.6); font-family: 'Consolas', monospace; }
+    .lp-bar .arrow { font-size: 18px; margin-left: 6px; }
+    .lp-bar.opp .arrow { color: #ff5566; }
+    .lp-bar.me .arrow { color: #55ff99; }
+
+    .floating-damage {
+      position: absolute;
+      right: 20px;
+      top: -6px;
+      font-size: 26px;
+      font-weight: bold;
+      color: #ff3344;
+      text-shadow: 0 0 10px rgba(255,51,68,0.9), 2px 2px 2px rgba(0,0,0,0.8);
+      opacity: 0;
+      pointer-events: none;
+      font-family: 'Consolas', monospace;
+    }
+    .floating-damage.show { animation: floatUp 1.8s ease-out forwards; }
+    @keyframes floatUp {
+      0%   { opacity: 0; transform: translateY(10px) scale(0.8); }
+      15%  { opacity: 1; transform: translateY(-6px) scale(1.15); }
+      70%  { opacity: 1; transform: translateY(-30px) scale(1); }
+      100% { opacity: 0; transform: translateY(-46px) scale(1); }
+    }
+
+    .battle-toast-overlay {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 1001; display: flex; align-items: center; gap: 14px;
+      background: linear-gradient(90deg, #1a0505, #2a0808);
+      border: 2px solid #ff3344; border-radius: 12px; padding: 10px 20px;
+      box-shadow: 0 0 24px rgba(255,51,68,0.6);
+      animation: toastIn 0.25s ease-out, toastOut 0.3s ease-in 1.7s forwards;
+    }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
+    .battle-toast-overlay img { width: 52px; height: 74px; border-radius: 4px; border: 1px solid #666; }
+    .battle-toast-overlay .vs-text { color: #ffcc00; font-weight: bold; font-size: 13px; }
+    .battle-toast-overlay .toast-info { text-align: center; color: #fff; font-size: 12px; }
+    .battle-toast-overlay .toast-damage { color: #ff3344; font-weight: bold; font-size: 20px; }
+
+    /* Deck-search reveal: shown to BOTH players (real tournament rules
+       require the searcher to reveal exactly what they found). Distinct
+       gold/blue palette from the red battle toast so the two are never
+       confused at a glance, and it lingers a beat longer since there's
+       a card name to actually read. */
+    .reveal-toast-overlay {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 1001; display: flex; align-items: center; gap: 14px;
+      background: linear-gradient(90deg, #1a1505, #241c08);
+      border: 2px solid #ffcc00; border-radius: 12px; padding: 10px 20px;
+      box-shadow: 0 0 24px rgba(255,204,0,0.6);
+      animation: toastIn 0.25s ease-out, toastOut 0.3s ease-in 2.7s forwards;
+    }
+    .reveal-toast-image {
+      width: 60px; height: 87px; border-radius: 4px; border: 1px solid #ffcc00;
+      animation: cardFlip3D 0.6s ease-in-out both;
+    }
+    .reveal-toast-text { color: #fff; font-size: 13px; line-height: 1.5; }
+    .reveal-toast-text strong { color: #ffcc00; font-size: 15px; }
+
+    /* Sword clash: attacker slides in from the left, target from the
+       right, colliding at the sword icon in the middle. */
+    .clash-left { animation: clashInLeft 0.5s ease-out; }
+    .clash-right { animation: clashInRight 0.5s ease-out; }
+    @keyframes clashInLeft { from { transform: translateX(-40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes clashInRight { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .clash-sword {
+      font-size: 26px;
+      animation: swordFlash 0.6s ease-out 0.35s both;
+      filter: drop-shadow(0 0 6px #ffcc00);
+    }
+
+    /* Set-monster reveal: a proper 3D card flip (dims through a sideways
+       pose, then shows the real card) instead of the image just appearing. */
+    .clash-right.revealing {
+      animation: clashInRight 0.5s ease-out, cardFlip3D 0.7s ease-in-out 0.4s both;
+    }
+    @keyframes cardFlip3D {
+      0%   { transform: rotateY(0deg); filter: brightness(0.7); }
+      49%  { filter: brightness(0.4); }
+      50%  { transform: rotateY(90deg); filter: brightness(0.4); }
+      51%  { filter: brightness(0.7); }
+      100% { transform: rotateY(0deg); filter: brightness(1); }
+    }
+
+    @keyframes swordFlash {
+      0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
+      50% { transform: scale(1.5) rotate(10deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+
+    /* Gentle entrance for cards on the field so a fresh page load reads
+       like cards settling into place rather than popping in instantly. */
+    .field-row .card, .mat-side .card {
+      animation: cardAppear 0.35s ease-out;
+    }
+    @keyframes cardAppear {
+      from { opacity: 0; transform: rotate(var(--rot)) scale(0.85) translateY(6px); }
+      to { opacity: 1; transform: rotate(var(--rot)) scale(1) translateY(0); }
+    }
+
+    /* ------------------------------------------------------------
+       FIELD EVENTS — a card actually landing on the field just now
+       (Summon, Set, Ritual/Tribute Summon, a Spell/Trap activating,
+       a Flip effect firing), as opposed to the generic settle-in
+       above that plays for every card on every re-render. Applied
+       as a one-shot class straight onto the specific card element by
+       instanceId (see playFieldEvent in the script below), so only
+       the card that just did something gets the dramatic treatment.
+       Every frame folds in rotate(var(--rot)) first — the card's
+       correct Attack/Defense orientation from the .defense rule
+       above — since a CSS animation replaces the whole `transform`
+       value for its duration; leaving that out is exactly what caused
+       Defense Position (and Set) monsters to flash upright mid-animation.
+       ------------------------------------------------------------ */
+    .card.fx-land-summon { animation: fxSummonPop 0.7s cubic-bezier(.2,1.6,.4,1) both; z-index: 20; }
+    @keyframes fxSummonPop {
+      0%   { transform: rotate(var(--rot)) scale(0.4) translateY(14px); filter: brightness(2.6) saturate(0.4); box-shadow: 0 0 0 rgba(255,214,90,0); }
+      45%  { transform: rotate(var(--rot)) scale(1.16); filter: brightness(1.7); box-shadow: 0 0 34px 10px rgba(255,214,90,0.85); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-set { animation: fxSetSlam 0.5s ease-out both; z-index: 20; }
+    @keyframes fxSetSlam {
+      0%   { transform: rotate(var(--rot)) scale(0.6); filter: brightness(2.2); box-shadow: 0 0 0 rgba(120,180,255,0); }
+      55%  { transform: rotate(var(--rot)) scale(1.08); filter: brightness(1.5); box-shadow: 0 0 22px 6px rgba(120,180,255,0.75); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-ritual { animation: fxRitualBurst 1.3s cubic-bezier(.2,1.5,.4,1) both; z-index: 25; }
+    @keyframes fxRitualBurst {
+      0%   { transform: rotate(var(--rot)) scale(0.3); filter: brightness(3) hue-rotate(0deg) saturate(0.3); box-shadow: 0 0 0 rgba(190,130,255,0); }
+      35%  { transform: rotate(var(--rot)) scale(1.28); filter: brightness(2.1) hue-rotate(20deg); box-shadow: 0 0 50px 16px rgba(190,130,255,0.95); }
+      55%  { transform: rotate(var(--rot)) scale(0.94); filter: brightness(1.6); box-shadow: 0 0 38px 12px rgba(120,150,255,0.85); }
+      75%  { transform: rotate(var(--rot)) scale(1.08); filter: brightness(1.3); box-shadow: 0 0 26px 8px rgba(190,130,255,0.7); }
+      100% { transform: rotate(var(--rot)) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-spell { animation: fxSpellFlash 0.8s ease-out both; z-index: 20; }
+    @keyframes fxSpellFlash {
+      0%   { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 0 0 rgba(70,220,120,0); }
+      30%  { transform: rotate(var(--rot)); filter: brightness(2) saturate(1.4); box-shadow: 0 0 28px 8px rgba(70,220,120,0.9); }
+      100% { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    .card.fx-land-trap { animation: fxTrapFlash 0.8s ease-out both; z-index: 20; }
+    @keyframes fxTrapFlash {
+      0%   { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 0 0 rgba(230,70,190,0); }
+      30%  { transform: rotate(var(--rot)); filter: brightness(2) saturate(1.4); box-shadow: 0 0 28px 8px rgba(230,70,190,0.9); }
+      100% { transform: rotate(var(--rot)); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    /* Vanishes the card in place once its activation flash finishes —
+       used for non-Continuous Spells/Traps right before they're sent to
+       the Graveyard, so the card doesn't just abruptly disappear when
+       the page re-renders without it. */
+    .card.fx-to-graveyard { animation: fxToGraveyard 0.45s ease-in both; z-index: 20; }
+    @keyframes fxToGraveyard {
+      0%   { transform: rotate(var(--rot)) scale(1); opacity: 1; }
+      100% { transform: rotate(var(--rot)) scale(0.25) translateY(30px); opacity: 0; }
+    }
+
+    .card.fx-land-flip { animation: fxFlipReveal 0.7s ease-in-out both; z-index: 20; }
+    @keyframes fxFlipReveal {
+      0%   { transform: rotate(var(--rot)) rotateY(0deg); filter: brightness(1); }
+      45%  { transform: rotate(var(--rot)) rotateY(90deg); filter: brightness(0.4); }
+      50%  { transform: rotate(var(--rot)) rotateY(90deg); filter: brightness(2.2); box-shadow: 0 0 30px 8px rgba(90,210,255,0.9); }
+      100% { transform: rotate(var(--rot)) rotateY(0deg) scale(1); filter: brightness(1); box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    }
+
+    /* The big centered callout banner — "NORMAL SUMMON!", "RITUAL
+       SUMMON!", "SPELL CARD ACTIVATE!", etc. — Master Duel/Tag
+       Force-style, distinct per event kind. Hidden by default; JS
+       toggles the "show" class for its brief window on-screen. */
+    .field-event-toast {
+      position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%) scale(0.7);
+      z-index: 400; text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity 0.25s, transform 0.25s;
+    }
+    .field-event-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    .field-event-toast .fe-text {
+      font-family: 'Orbitron', 'Consolas', monospace;
+      font-size: 30px; font-weight: 800; letter-spacing: 2px;
+      color: #fff; padding: 8px 28px; border-radius: 6px;
+      text-shadow: 0 0 14px currentColor, 0 2px 4px rgba(0,0,0,0.9);
+      white-space: nowrap;
+    }
+    .field-event-toast .fe-sub {
+      margin-top: 4px; font-size: 14px; color: #dbe9ff;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.9); white-space: nowrap;
+    }
+    .field-event-toast.fe-summon .fe-text { color: #ffd65a; }
+    .field-event-toast.fe-set .fe-text { color: #78b4ff; }
+    .field-event-toast.fe-ritual .fe-text { font-size: 34px; color: #d9a8ff; }
+    .field-event-toast.fe-spell .fe-text { color: #66e07f; }
+    .field-event-toast.fe-trap .fe-text { color: #e878c8; }
+    .field-event-toast.fe-flip .fe-text { color: #5ad2ff; }
+
+    /* Flying card used for draw/discard animations (Pot of Greed, Card
+       Destruction, etc.) — a fixed-position element that gets its actual
+       start/end coordinates from real zone elements via JS. */
+    .flying-card {
+      position: fixed;
+      width: 42px;
+      height: 60px;
+      background: linear-gradient(135deg, #8b0000 0%, #4a0000 100%);
+      border: 2px solid #ffcc00;
+      border-radius: 4px;
+      z-index: 1500;
+      pointer-events: none;
+      transition: left 0.55s ease-in-out, top 0.55s ease-in-out, opacity 0.55s ease-in-out, transform 0.55s ease-in-out;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+    }
+    .flying-card.to-graveyard {
+      background: linear-gradient(135deg, #333, #111);
+      border-color: #888;
+    }
+
+    .flying-card-label {
+      position: fixed;
+      z-index: 1501;
+      color: #ffcc00;
+      font-size: 11px;
+      font-weight: bold;
+      text-shadow: 1px 1px 2px black;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .field-mid {
+      display: flex;
+      gap: 8px;
+    }
+    .side-col {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 66px;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+    }
+    .field-center {
+      flex: 1;
+      background: linear-gradient(180deg, rgba(20,50,80,0.35), rgba(10,25,40,0.35));
+      border: 1px solid #23507c;
+      border-radius: 10px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field-row { display: flex; justify-content: space-around; gap: 5px; }
+
+    .zone-counter {
+      position: relative;
+      width: 58px;
+      height: 82px;
+      border: 2px solid #2a5a8c;
+      border-radius: 5px;
+      background: linear-gradient(135deg, #1a1a2e, #0a0a14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #7fb3e0;
+      text-align: center;
+    }
+    /* A one-shot Spell/Trap is already gone from the field by the time
+       the page re-renders (it moved to the Graveyard server-side, same
+       request, right after its effect resolved) — this pulses the
+       Graveyard icon itself as the "it just landed here" cue, since
+       there's no card element left on the board to animate. */
+    /* Floating stand-in for a card that's already left the field by the
+       time the page renders — see spawnGhostCard in the script below. */
+    .ghost-card {
+      position: fixed; left: 50%; top: 55%; width: 120px; height: 172px;
+      transform: translate(-50%, -50%); opacity: 0; z-index: 390;
+      pointer-events: none; border-radius: 6px;
+      box-shadow: 0 0 34px 8px rgba(255,255,255,0.45);
+    }
+    .ghost-card img { width: 100%; height: 100%; border-radius: 6px; display: block; }
+    .zone-counter.gy-pulse { animation: gyPulse 0.9s ease-out; }
+    @keyframes gyPulse {
+      0%   { box-shadow: 0 0 0 rgba(180,100,220,0); border-color: #2a5a8c; }
+      30%  { box-shadow: 0 0 22px 8px rgba(180,100,220,0.85); border-color: #c88bff; }
+      100% { box-shadow: 0 0 0 rgba(180,100,220,0); border-color: #2a5a8c; }
+    }
+    .zone-counter .count {
+      position: absolute;
+      bottom: 2px;
+      right: 3px;
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      font-weight: bold;
+      font-size: 11px;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    .zone-counter img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
+    .zone-counter.gy-clickable { cursor: pointer; }
+    .zone-counter.gy-clickable:hover { outline: 2px solid #66ccff; }
+    .zone-label { font-size: 9px; color: #5a90bf; margin-top: 2px; }
+
+    .gy-modal-overlay {
+      display: none;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1002;
+      align-items: center; justify-content: center;
+    }
+    .gy-modal {
+      background: linear-gradient(180deg, #10263e, #05101c);
+      border: 2px solid #5a90bf; border-radius: 12px; padding: 18px;
+      max-width: 600px; max-height: 80vh; overflow-y: auto; text-align: center;
+    }
+    .gy-modal h3 { color: #7fdfff; margin: 0 0 12px 0; }
+    .gy-modal-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+      max-width: 560px;
+    }
+    .gy-modal-card { width: 80px; text-align: center; }
+    .gy-modal-card img { width: 100%; border-radius: 4px; }
+    .gy-modal-card .gname { font-size: 9px; color: #cde; margin-top: 2px; }
+    .gy-modal-close {
+      margin-top: 14px; background: #555; color: #fff; border: none;
+      padding: 8px 18px; border-radius: 6px; cursor: pointer; font-weight: bold;
+    }
+
+    .restart-btn {
+      display: inline-block; margin-top: 12px; background: linear-gradient(180deg, #00e5ff, #0088aa);
+      color: #04141c; border: 1px solid #aef2ff; font-weight: bold;
+      padding: 9px 22px; border-radius: 20px; cursor: pointer; font-size: 13px; text-decoration: none;
+    }
+
+    .top-header {
+      max-width: 1400px;
+      margin: 0 auto 8px auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0a0a0a;
+      border-bottom: 3px solid transparent;
+      border-image: linear-gradient(90deg, #ff4d4d, #4da3ff) 1;
+      padding: 10px 24px;
+      border-radius: 4px;
+    }
+    /* Subtle per-side identity wash — red toward Kaiba, blue toward
+       Yugi/you — reinforcing the avatar/name border colors above
+       instead of a flat black bar across the whole HUD. */
+    .top-header .header-side {
+      position: relative; padding: 6px 16px; border-radius: 6px;
+    }
+    .top-header .header-side.opp-side {
+      background: linear-gradient(90deg, rgba(255,59,59,0.16), transparent 75%);
+    }
+    .top-header .header-side.me-side {
+      background: linear-gradient(270deg, rgba(59,167,255,0.16), transparent 75%);
+    }
+    .top-header .header-side { display: flex; align-items: center; gap: 14px; }
+    .top-header .header-side.opp-side { flex-direction: row; }
+    .top-header .header-side.me-side { flex-direction: row-reverse; }
+    .top-header .header-avatar {
+      width: 96px; height: 96px; border-radius: 8px; object-fit: cover;
+      border: 3px solid #445; box-shadow: 0 0 8px rgba(0,0,0,0.6);
+    }
+    .top-header .header-avatar.active-turn {
+      border-color: #7fdfff; box-shadow: 0 0 18px rgba(127,223,255,0.9);
+    }
+    /* Permanent per-character identity colors — Kaiba red, Yugi (you)
+       blue — regardless of whose turn it is. Active-turn still adds an
+       extra-bright glow on top, just tinted to match instead of
+       overriding to a generic cyan. */
+    .top-header .header-avatar.avatar-kaiba {
+      border-color: #ff3b3b; box-shadow: 0 0 10px rgba(255,59,59,0.55);
+    }
+    .top-header .header-avatar.avatar-yugi {
+      border-color: #3ba7ff; box-shadow: 0 0 10px rgba(59,167,255,0.55);
+    }
+    .top-header .header-avatar.avatar-kaiba.active-turn {
+      border-color: #ff5c5c; box-shadow: 0 0 22px rgba(255,59,59,0.95);
+    }
+    .top-header .header-avatar.avatar-yugi.active-turn {
+      border-color: #5cb8ff; box-shadow: 0 0 22px rgba(59,167,255,0.95);
+    }
+    .top-header .header-lp-name { display: flex; flex-direction: column; line-height: 1.15; }
+    .top-header .header-side.me-side .header-lp-name { align-items: flex-end; }
+    .top-header .header-lp { font-size: 30px; font-weight: bold; color: #ffe14d; font-family: 'Consolas', monospace; transition: color 0.15s; }
+    .top-header .header-lp.lp-hit { color: #ff4d4d; text-shadow: 0 0 10px rgba(255,77,77,0.9); }
+    .top-header .header-lp.avatar-kaiba { text-shadow: 0 0 8px rgba(255,59,59,0.35); }
+    .top-header .header-lp.avatar-yugi { text-shadow: 0 0 8px rgba(59,167,255,0.35); }
+    .top-header .header-name { font-size: 22px; color: #fff; font-weight: 500; }
+    .top-header .header-name.active-turn { color: #7fdfff; text-shadow: 0 0 8px rgba(127,223,255,0.8); }
+    .top-header .header-name.avatar-kaiba { color: #ff8a8a; }
+    .top-header .header-name.avatar-yugi { color: #8ac4ff; }
+    .top-header .header-name.avatar-kaiba.active-turn { color: #ff5c5c; text-shadow: 0 0 8px rgba(255,59,59,0.8); }
+    .top-header .header-name.avatar-yugi.active-turn { color: #5cb8ff; text-shadow: 0 0 8px rgba(59,167,255,0.8); }
+    .top-header .header-turn { text-align: center; }
+    .top-header .header-turn .turn-label { font-size: 12px; color: #aaa; letter-spacing: 2px; }
+    .top-header .header-turn .turn-num { font-size: 22px; font-weight: bold; color: #fff; }
+
+    /* ============ HORIZONTAL PHASE PILL (sits on the midline between
+       the two players' fields, like the reference layout) ============ */
+    .phase-pill-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 3px;
+      margin: 6px auto;
+      padding: 4px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 30px;
+      width: fit-content;
+    }
+    .phase-pill-bar .phase-icon {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+    .phase-pill-bar .phase-icon-btn { border-radius: 20px; }
+
+    /* Player's own deck: double-click to surrender (see JS below) */
+    #deckMe { cursor: pointer; }
+    #deckMe:hover { outline: 2px solid #ff8080; box-shadow: 0 0 10px rgba(255,80,80,0.6); }
+
+    /* ---- Tag Force-style card frame coloring (applied to face-up cards
+       only, so face-down Sets don't leak monster/spell subtype info) ---- */
+    .card.frame-normal    { box-shadow: 0 0 0 2px #d4af37 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-effect     { box-shadow: 0 0 0 2px #e8792a inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-fusion    { box-shadow: 0 0 0 2px #a855c9 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-ritual    { box-shadow: 0 0 0 2px #4a90d9 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-synchro   { box-shadow: 0 0 0 2px #e8e8e8 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-xyz       { box-shadow: 0 0 0 2px #2b2b2b inset, 0 0 0 3px #555 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-token     { box-shadow: 0 0 0 2px #999999 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-spell     { box-shadow: 0 0 0 2px #2ecc71 inset, 0 2px 6px rgba(0,0,0,0.6); }
+    .card.frame-trap      { box-shadow: 0 0 0 2px #d94fa8 inset, 0 2px 6px rgba(0,0,0,0.6); }
+
+    .slot {
+      border: 2px dashed #2a4a6c;
+      border-radius: 6px;
+      width: 76px;
+      height: 108px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,20,40,0.3);
+    }
+
+    .card {
+      width: 70px;
+      height: 100px;
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+      background-size: cover;
+      position: relative;
+      /* Real rule: a face-up Defense Position monster (and a Set monster,
+         which defaults to Defense) is rendered sideways — only face-up
+         Attack Position is upright. --rot holds that per-card rotation as
+         a variable, rather than a hardcoded transform, specifically so
+         every animation below can fold it in (rotate(var(--rot)) ...)
+         instead of overwriting it. CSS animations replace the whole
+         `transform` value for their duration, so any keyframe that didn't
+         include the current rotation would otherwise flash the card
+         upright for the length of that animation — every phase change,
+         since cardAppear below runs on every single re-render. */
+      --rot: 0deg;
+      transform: rotate(var(--rot));
+      transition: transform 0.15s, box-shadow 0.15s, outline 0.15s;
+      cursor: pointer;
+      user-select: none;
+    }
+    .card.defense { --rot: 90deg; }
+    .card img { width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+    .card.face-down { background: linear-gradient(135deg, #8b0000 0%, #4a0000 100%); border: 2px solid #ffcc00; }
+    .card.face-down img { display: none; }
+    .card:hover { transform: rotate(var(--rot)) translateY(-4px) scale(1.04); z-index: 5; }
+
+    .card.selected { outline: 3px solid #ffcc00; box-shadow: 0 0 15px #ffcc00; }
+    .summon-btn {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8); color: #ffcc00; font-weight: bold; font-size: 9px;
+      text-shadow: 1px 1px 2px black; text-align: center;
+      display: none; align-items: center; justify-content: center; pointer-events: none;
+    }
+    .card.selected .summon-btn { display: flex; }
+    .card.selected[data-summonable="false"] .summon-btn { color: #ffaa00; }
+
+    .action-btn-row { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; flex-direction: column; }
+    .card.selected .action-btn-row { display: flex; }
+    .action-btn {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: bold; color: #ffcc00;
+      background: rgba(0,0,0,0.78); text-shadow: 1px 1px 2px black; text-align: center;
+    }
+    .action-btn.set-btn { color: #66ccff; border-top: 1px solid #444; }
+    .action-btn.activate-btn { color: #ff66ff; }
+    .action-btn:hover { background: rgba(0,0,0,0.92); }
+
+    .effect-badge {
+      position: absolute; top: -6px; left: -6px; width: 22px; height: 22px;
+      background: radial-gradient(circle, #ffe066, #cc8800);
+      border: 1px solid #fff3b0; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: bold; color: #402800; z-index: 6; cursor: pointer;
+      box-shadow: 0 0 8px rgba(255,204,0,0.8);
+      animation: effectBadgePulse 1s ease-in-out infinite;
+    }
+    @keyframes effectBadgePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+
+    .union-badge {
+      position: absolute; top: -6px; right: -6px; width: 22px; height: 22px;
+      background: radial-gradient(circle, #7fc4ff, #2a6fcc);
+      border: 1px solid #d0ecff; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: bold; color: #04203f; z-index: 6; cursor: pointer;
+      box-shadow: 0 0 8px rgba(80,160,255,0.8);
+    }
+
+    .card.can-reposition { outline: 2px dashed #66ccff; cursor: pointer; }
+    .card.can-attack { outline: 2px dashed #ff6633; cursor: pointer; box-shadow: 0 0 10px rgba(255,102,51,0.5); }
+    .card.attacker-selected { outline: 3px solid #ff3333; box-shadow: 0 0 18px #ff3333; animation: attackerPulse 1s infinite; }
+    @keyframes attackerPulse { 0%,100% { box-shadow: 0 0 10px #ff3333; } 50% { box-shadow: 0 0 22px #ff3333; } }
+    .card.attack-target.target-eligible { outline: 3px dashed #ff3333; cursor: crosshair; animation: targetPulse 1s infinite; }
+    @keyframes targetPulse { 0%,100% { outline-color: #ff3333; } 50% { outline-color: #ff9999; } }
+
+    /* The attack sword: shown on every monster that can currently
+       declare an attack. Points straight up by default (blade tip at
+       the top of the icon). JS rotates it left/right with a plain CSS
+       transform to visually aim at whichever opponent monster is being
+       hovered/targeted, and snaps it back upright for a direct attack. */
+    .sword-icon-wrap {
+      position: absolute; top: -10px; left: 50%; width: 20px; height: 50px;
+      margin-left: -10px; z-index: 7; cursor: pointer; pointer-events: none;
+      transform-origin: 50% 90%;
+      transition: transform 0.25s ease-out;
+      animation: swordReady 1.2s ease-in-out infinite;
+    }
+    .sword-icon-wrap.sword-aiming { animation: none; }
+    .sword-icon {
+      width: 100%; height: 100%;
+      color: #ff6633;
+      filter: drop-shadow(0 0 3px #000) drop-shadow(0 0 5px rgba(255,102,51,0.9));
+    }
+    .sword-icon polygon, .sword-icon rect, .sword-icon circle { fill: currentColor; }
+    @keyframes swordReady { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+    .card.can-activate-set { outline: 2px dashed #ff66ff; cursor: pointer; }
+    .card.response-eligible { outline: 3px solid #33ff99; box-shadow: 0 0 15px #33ff99; }
+
+    .card.target-eligible { outline: 3px dashed #33ff99; cursor: crosshair; }
+
+    .direct-attack-zone {
+      margin-top: 4px; padding: 5px 10px; background: linear-gradient(180deg,#ff5544,#aa2211);
+      border: 1px solid #ff8877; color: #fff; font-weight: bold; font-size: 11px;
+      border-radius: 6px; cursor: pointer; text-align: center;
+    }
+    .direct-attack-zone.target-eligible-zone { animation: targetPulse 1s infinite; box-shadow: 0 0 14px #ff3333; position: relative; }
+    .direct-attack-zone.target-eligible-zone::after {
+      content: ' ';
+      position: absolute;
+      top: -14px;
+      right: 4px;
+      font-size: 16px;
+      animation: swordHover 0.8s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+
+    .hand-strip {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      min-height: 108px;
+      padding: 8px;
+      background: rgba(0,10,20,0.4);
+      border-radius: 8px;
+      border: 1px solid #1a3a5c;
+    }
+    .opp-hand-strip { display: flex; justify-content: center; gap: 6px; padding: 4px; }
+    .opp-hand-strip .card { width: 40px; height: 58px; }
+
+    /* ============ PHASE BAR (bottom of field, above hand) ============ */
+    .action-row {
+      display: flex; justify-content: center; align-items: center; gap: 10px;
+    }
+    .go-btn {
+      background: linear-gradient(180deg, #00e5ff, #0088aa);
+      color: #04141c; border: 1px solid #aef2ff; font-weight: bold;
+      padding: 9px 22px; border-radius: 20px; cursor: pointer; font-size: 13px;
+      box-shadow: 0 0 12px rgba(0,229,255,0.5);
+    }
+
+    /* ============ RIGHT: CARD PREVIEW PANEL ============ */
+    .preview-panel {
+      width: 230px;
+      flex-shrink: 0;
+      background: linear-gradient(180deg, #10263e, #071522);
+      border: 1px solid #2a5a8c;
+      border-radius: 10px;
+      padding: 12px;
+      position: sticky;
+      top: 10px;
+    }
+    .preview-image-wrap {
+      width: 100%; height: 270px; border-radius: 6px; overflow: hidden;
+      background: #0a1420; border: 1px solid #234; display: flex; align-items: center; justify-content: center;
+      margin-bottom: 10px;
+      box-shadow: 0 0 14px rgba(0,150,255,0.25) inset;
+    }
+    .preview-image-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; display: none; }
+    .preview-placeholder { color: #345; font-size: 12px; text-align: center; padding: 10px; }
+    .preview-name { font-weight: bold; font-size: 15px; color: #ffcc00; margin-bottom: 4px; }
+    .preview-stats { font-size: 12px; color: #7fdfff; margin-bottom: 8px; font-family: Consolas, monospace; }
+    .preview-effect {
+      font-size: 11px; color: #ffd166; line-height: 1.4; margin-bottom: 8px;
+      padding: 6px 8px; background: rgba(255, 209, 102, 0.08);
+      border-left: 2px solid #ffd166; border-radius: 2px; display: none;
+    }
+    .preview-desc { font-size: 12px; color: #b8d4ee; line-height: 1.5; max-height: 230px; overflow-y: auto; }
+
+    /* Always-on effect-type badge — shown on any face-up card that has a
+       programmed effect, separate from the clickable FX/UN action badges
+       (which only appear when that action is usable RIGHT NOW). This one
+       is purely informational: at a glance, know what kind of effect a
+       card has even when it's not your turn / nothing is currently
+       activatable. Sits bottom-left so it never collides with the FX
+       badge (top-left) or Union badge (top-right). */
+    .kind-tag {
+      position: absolute; bottom: -6px; left: -6px; min-width: 20px; height: 16px;
+      padding: 0 4px; border-radius: 4px; z-index: 5; pointer-events: none;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 8px; font-weight: bold; letter-spacing: 0.3px;
+      color: #fff; text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
+      border: 1px solid rgba(255,255,255,0.35);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    }
+    .kind-tag.kind-ignition { background: linear-gradient(180deg, #ff9d3d, #cc6600); }
+    .kind-tag.kind-flip { background: linear-gradient(180deg, #4fd1ff, #0e7fb3); }
+    .kind-tag.kind-onsummon { background: linear-gradient(180deg, #ffe066, #b38f00); }
+    .kind-tag.kind-dynamic { background: linear-gradient(180deg, #c88bff, #7a2fcc); }
+    .kind-tag.kind-gytrigger { background: linear-gradient(180deg, #6ee7a8, #1f8f52); }
+    .kind-tag.kind-handresponse { background: linear-gradient(180deg, #5dd6c0, #1a8f7a); }
+    .kind-tag.kind-union { background: linear-gradient(180deg, #7fc4ff, #2a6fcc); }
+    .kind-tag.kind-fusion { background: linear-gradient(180deg, #ff7fd4, #b32a8f); }
+    .kind-tag.kind-ritual { background: linear-gradient(180deg, #b3c6ff, #4a5fcc); }
+    .kind-tag.kind-spelltrap { background: linear-gradient(180deg, #adb8c9, #4d5a6e); }
+
+    .duel-log {
+      background: #05101c; border: 1px solid #1a3a5c; border-radius: 8px;
+      padding: 8px 12px; max-height: 130px; overflow-y: auto; font-size: 11px;
+      color: #9fc4e8; font-family: Consolas, monospace; white-space: pre-wrap; line-height: 1.5; margin-top: 10px;
+    }
+
+    #targetPanel {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, #10263e, #05101c);
+      border-top: 3px solid #33ff99; padding: 12px; z-index: 999;
+      text-align: center; align-items: center; justify-content: center; gap: 10px;
+    }
+    #targetPanel select { padding: 6px; border-radius: 4px; }
+    #targetPanel button { padding: 6px 14px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer; }
+    #targetPanelConfirm { background: #33ff99; color: #111; }
+    #targetPanelConfirm:disabled { background: #446; color: #789; cursor: not-allowed; }
+    #targetPanelCancel { background: #555; color: #fff; }
+
+    #discardChoicePanel {
+      display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, #3e1010, #1c0505);
+      border-top: 3px solid #ff6b3d; padding: 12px; z-index: 999;
+      text-align: center; align-items: center; justify-content: center; gap: 14px;
+    }
+    #discardChoiceText { color: #ffd9c8; font-size: 13px; font-weight: 600; }
+    #discardChoiceConfirm {
+      padding: 6px 14px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer;
+      background: #ff6b3d; color: #111;
+    }
+    #discardChoiceConfirm:disabled { background: #553a30; color: #987; cursor: not-allowed; }
+
+    #positionChoicePanel {
+      display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, #102a3e, #051620);
+      border-top: 3px solid #4da3ff; padding: 12px; z-index: 999;
+      text-align: center; align-items: center; justify-content: center; gap: 14px;
+    }
+    #positionChoicePanel span { color: #c8e4ff; font-size: 13px; font-weight: 600; }
+    #positionChoiceConfirm {
+      padding: 6px 14px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer;
+      background: #4da3ff; color: #111;
+    }
+
+    #ritualChoicePanel {
+      display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, #2a1040, #10051c);
+      border-top: 3px solid #c88bff; padding: 12px; z-index: 999;
+      text-align: center; align-items: center; justify-content: center; gap: 14px;
+    }
+    #ritualChoicePanel span { color: #e6cfff; font-size: 13px; font-weight: 600; }
+    #ritualChoiceConfirm {
+      padding: 6px 14px; font-weight: bold; border-radius: 4px; border: none; cursor: pointer;
+      background: #c88bff; color: #111;
+    }
+    #ritualChoiceConfirm:disabled { background: #4a3a5a; color: #987; cursor: not-allowed; }
+    .ritual-selected { outline: 3px solid #c88bff; box-shadow: 0 0 15px #c88bff; }
+    .player-hand-card.ritual-selected { transform: translateY(-8px); }
+
+    /* A hand card the player has picked to discard this window — same
+       "selected" language as .card.selected elsewhere, distinct orange
+       so it doesn't get confused with a normal summon/target selection. */
+    .player-hand-card.discard-selected {
+      outline: 3px solid #ff6b3d; box-shadow: 0 0 15px #ff6b3d;
+      transform: translateY(-8px);
+    }
+
+    /* Cyber Jar-style "choose Attack or Defense" toggle. Sits on a card
+       that may itself be rotated 90deg for Defense Position (--rot) —
+       counter-rotate so these buttons always render upright regardless
+       of which way the card is currently facing. */
+    .position-choice-toggle {
+      position: absolute; bottom: -26px; left: 50%;
+      transform: translateX(-50%) rotate(calc(-1 * var(--rot, 0deg)));
+      display: flex; gap: 3px; z-index: 30;
+    }
+    .pos-btn {
+      font-size: 9px; font-weight: bold; padding: 2px 5px; border-radius: 3px;
+      border: 1px solid #556; background: #223; color: #9ab; cursor: pointer;
+    }
+    .pos-btn.active.pos-atk { background: #ff6b3d; border-color: #ff6b3d; color: #111; }
+    .pos-btn.active.pos-def { background: #4da3ff; border-color: #4da3ff; color: #111; }
+
+    .game-over-banner {
+      text-align: center; background: linear-gradient(90deg, #ffcc00, #ff9900); color: #111;
+      font-size: 26px; font-weight: bold; padding: 14px; border-radius: 10px;
+      box-shadow: 0 0 20px rgba(255,204,0,0.6); margin-bottom: 8px;
+    }
+
+    /* ============ RESPONSE MODAL ============ */
+    .response-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .response-modal {
+      background: linear-gradient(180deg, #12314f, #061422);
+      border: 2px solid #33ff99; border-radius: 12px; padding: 22px;
+      max-width: 480px; text-align: center; box-shadow: 0 0 30px rgba(51,255,153,0.4);
+    }
+    .response-modal h3 { color: #ffdd66; margin: 0 0 8px 0; font-size: 17px; }
+    .response-modal p { color: #cde; margin: 0 0 14px 0; font-size: 13px; }
+    .response-options { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .response-option-card {
+      width: 76px; text-align: center; cursor: pointer; padding: 4px;
+      border: 2px solid #33ff99; border-radius: 6px; background: rgba(51,255,153,0.08);
+    }
+    .response-option-card:hover { background: rgba(51,255,153,0.25); }
+    .response-option-card img { width: 100%; border-radius: 4px; margin-bottom: 3px; }
+    .response-option-card .rname { font-size: 9px; color: #aef2c0; }
+    .response-modal .no-response-btn {
+      background: #444; color: #fff; border: 1px solid #666; padding: 8px 18px;
+      border-radius: 6px; cursor: pointer; font-weight: bold;
+    }
+
+    /* AI turn indicator — shown between each of Kaiba's individual actions
+       so his turn reads as a sequence of visible plays, not one silent jump. */
+    .ai-turn-banner {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 998; background: linear-gradient(90deg, #2a1a3a, #1a1030);
+      border: 2px solid #cc88ff; border-radius: 30px; padding: 8px 20px;
+      color: #e8ccff; font-size: 13px; font-weight: bold;
+      box-shadow: 0 0 20px rgba(200,120,255,0.4);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .ai-spinner {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff;
+      border-radius: 50%;
+      animation: aiSpin 0.8s linear infinite;
+      vertical-align: -2px;
+    }
+    @keyframes aiSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .ai-dots::after {
+      content: '.'; animation: aiDots 1.2s steps(1) infinite;
+    }
+    @keyframes aiDots { 0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; } }
+    .ai-continue-btn {
+      background: #cc88ff; color: #1a0530; border: none; padding: 4px 12px;
+      border-radius: 14px; cursor: pointer; font-weight: bold; font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <%
+    const isPlayer1Turn = currentPlayer.name === player1.name;
+    const inMainPhase = (phase === 'm1' || phase === 'm2');
+    const inBattlePhase = (phase === 'battle');
+    const isAwaitingResponse = typeof awaitingResponse !== 'undefined' && awaitingResponse;
+    const isMyResponse = isAwaitingResponse && battleResponse && battleResponse.defender === player1;
+    const isAwaitingSummonResponse = typeof awaitingSummonResponse !== 'undefined' && awaitingSummonResponse;
+    const isMySummonResponse = isAwaitingSummonResponse && game.summonResponse && game.summonResponse.defender === player1;
+    const isAwaitingDiscardChoice = typeof awaitingDiscardChoice !== 'undefined' && awaitingDiscardChoice;
+    const isMyDiscardChoice = isAwaitingDiscardChoice && typeof discardChoice !== 'undefined' && discardChoice && discardChoice.player === player1;
+    const isAwaitingPositionChoice = typeof awaitingPositionChoice !== 'undefined' && awaitingPositionChoice;
+    const isMyPositionChoice = isAwaitingPositionChoice && typeof positionChoice !== 'undefined' && positionChoice && positionChoice.player === player1;
+    const isAwaitingRitualChoice = typeof awaitingRitualChoice !== 'undefined' && awaitingRitualChoice;
+    const isMyRitualChoice = isAwaitingRitualChoice && typeof ritualChoice !== 'undefined' && ritualChoice && ritualChoice.player === player1;
+    const canAct = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !isAwaitingSummonResponse && !isAwaitingDiscardChoice && !isAwaitingPositionChoice && !isAwaitingRitualChoice && !(typeof gameOver !== 'undefined' && gameOver);
+    const canActMain = canAct && inMainPhase;
+    const p2MonsterCount = player2.zone.monster.filter(m => m).length;
+    const aiTurnPaused = !isPlayer1Turn && !isMyResponse && !isMySummonResponse && !(typeof gameOver !== 'undefined' && gameOver);
+
+    const gyMonsters = [...player1.zone.graveyard, ...player2.zone.graveyard]
+      .filter(gc => game.isMonster(gc))
+      .map(gc => ({ id: gc.instanceId, label: gc.card.name + " (" + gc.owner.name + "'s GY)" }));
+
+    const fusionOptions = game.getAvailableFusions(player1)
+      .map(gc => ({ id: gc.instanceId, label: gc.card.name + " (ATK " + gc.card.atk + ")" }));
+
+    // Tag Force-style frame coloring: each card gets a border/name-plate
+    // color that matches its real TCG frame (Normal=gold, Effect=orange,
+    // Fusion=purple, Ritual=blue, Spell=green, Trap=magenta).
+    function frameClass(card) {
+      const t = (card.type || card.frameType || "").toLowerCase();
+      if (t.includes("fusion")) return "frame-fusion";
+      if (t.includes("ritual")) return "frame-ritual";
+      if (t.includes("synchro")) return "frame-synchro";
+      if (t.includes("xyz")) return "frame-xyz";
+      if (t.includes("token")) return "frame-token";
+      if (t.includes("effect")) return "frame-effect";
+      if (t.includes("normal") && t.includes("monster")) return "frame-normal";
+      if (t.includes("trap")) return "frame-trap";
+      if (t.includes("spell")) return "frame-spell";
+      return "frame-normal";
+    }
+
+    function previewAttrs(gc, viewerIsOwner) {
+      const visible = gc.faceUp || viewerIsOwner;
+      const fx = visible ? game.getEffectInfo(gc.card.name) : { tags: [], summary: "" };
+      return {
+        name: visible ? gc.card.name : "Set Card",
+        desc: visible ? (gc.card.desc || "") : "This card is face-down. Its identity is hidden until it is revealed.",
+        atk: visible && gc.card.atk !== undefined ? game.getAtk(gc) : "",
+        def: visible && gc.card.def !== undefined ? game.getDef(gc) : "",
+        level: visible && gc.card.level ? gc.card.level : "",
+        image: visible ? gc.card.image : "",
+        imageCropped: visible ? (gc.card.imageCropped || gc.card.image) : "",
+        // "What does this card actually DO?" — shown in the hover preview
+        // for every card, and as a small always-on badge (effectTag) for
+        // monster/spell/trap cards sitting face-up on the field, so you
+        // don't have to guess why a card did or didn't do anything.
+        effectSummary: fx.summary,
+        effectTag: fx.tags.length ? fx.tags[0].tag : "",
+        effectKind: fx.tags.length ? fx.tags[0].kind : ""
+      };
+    }
+
+    const responseEligibleCards = isMyResponse
+      ? player1.getSpellTrapsOnField().filter(gc => {
+          if (gc.faceUp) return false;
+          const m = game.getCardMeta(gc.card.name);
+          if (!m) return false;
+          if (m.kind === 'trap' && gc.turnSet === game.turn) return false;
+          return m.window === 'response' || m.window === 'anytime';
+        })
+      : [];
+
+    const handResponseEligibleCards = isMyResponse
+      ? game.getEligibleHandResponses(player1)
+      : [];
+
+    const summonResponseEligibleCards = isMySummonResponse
+      ? game.getEligibleSummonResponses(player1)
+      : [];
+  %>
+
+  <% if (typeof gameOver !== 'undefined' && gameOver) { %>
+    <div class="game-over-banner">
+      <%= winner.name %> WINS THE DUEL!
+      <div>
+        <a href="/game/start" class="restart-btn">RESTART DUEL</a>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (isMyResponse) { %>
+    <div class="response-modal-overlay" id="responseModalOverlay">
+      <div class="response-modal">
+        <h3> <%= pendingAttack.attacker.card.name %> is attacking
+          <% if (pendingAttack.target) { %>your <%= pendingAttack.target.card.name %><% } else { %>you directly<% } %>!</h3>
+        <p>Activate a Spell/Trap Card?</p>
+        <% if (responseEligibleCards.length > 0 || handResponseEligibleCards.length > 0) { %>
+          <div class="response-options">
+            <% responseEligibleCards.forEach(gc => { %>
+              <% const pv = previewAttrs(gc, true); const m = game.getCardMeta(gc.card.name); %>
+              <div class="response-option-card"
+                   data-instance-id="<%= gc.instanceId %>"
+                   data-needs-target="<%= m.needsTarget || '' %>"
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                <img src="<%= gc.card.image %>" />
+                <div class="rname"><%= gc.card.name %></div>
+              </div>
+            <% }) %>
+            <% handResponseEligibleCards.forEach(gc => { %>
+              <% const pv = previewAttrs(gc, true); %>
+              <div class="response-option-card hand-response-card"
+                   data-instance-id="<%= gc.instanceId %>"
+                   data-hand-response="true"
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                <img src="<%= gc.card.image %>" />
+                <div class="rname">Discard <%= gc.card.name %></div>
+              </div>
+            <% }) %>
+          </div>
+        <% } else { %>
+          <p style="color:#889;">You have no Set cards that can respond.</p>
+        <% } %>
+        <form action="/game/pass-response" method="POST">
+          <button type="submit" class="no-response-btn">No — Take It </button>
+        </form>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (isMySummonResponse) { %>
+    <% const summonedGc = game.summonResponse.summonedGc; %>
+    <div class="response-modal-overlay" id="summonResponseModalOverlay">
+      <div class="response-modal">
+        <h3><%= summonedGc.owner.name %> Summons <%= summonedGc.card.name %> (ATK <%= game.getAtk(summonedGc) %>)!</h3>
+        <p>Activate a Spell/Trap Card?</p>
+        <% if (summonResponseEligibleCards.length > 0) { %>
+          <div class="response-options">
+            <% summonResponseEligibleCards.forEach(gc => { %>
+              <% const pv = previewAttrs(gc, true); const m = game.getCardMeta(gc.card.name); %>
+              <% const isImplicitTarget = m.window === 'summon'; %>
+              <div class="response-option-card summon-response-card"
+                   data-instance-id="<%= gc.instanceId %>"
+                   data-needs-target="<%= isImplicitTarget ? '' : (m.needsTarget || '') %>"
+                   data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                <img src="<%= gc.card.image %>" />
+                <div class="rname"><%= gc.card.name %></div>
+              </div>
+            <% }) %>
+          </div>
+        <% } else { %>
+          <p style="color:#889;">You have no Set cards that can respond.</p>
+        <% } %>
+        <form action="/game/pass-response" method="POST">
+          <button type="submit" class="no-response-btn">No — Take It </button>
+        </form>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (aiTurnPaused) { %>
+    <div class="ai-turn-banner" id="aiTurnBanner">
+      <span class="ai-spinner"></span> <%= player2.name %> is playing<span class="ai-dots">...</span>
+      <form action="/game/continue-ai" method="POST" id="aiContinueForm" style="display:inline;">
+        <button type="submit" class="ai-continue-btn">Continue Now</button>
+      </form>
+    </div>
+  <% } %>
+
+  <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && !isMyResponse) { %>
+    <div class="battle-toast-overlay" id="battleToast">
+      <img class="clash-left" src="<%= lastBattleEvent.attackerImage %>" />
+      <div class="clash-sword">&times;</div>
+      <div class="toast-info">
+        <div class="vs-text"><%= lastBattleEvent.attackerName %> <%= lastBattleEvent.wasDirect ? 'attacks directly!' : ('attacks ' + lastBattleEvent.targetName + '!') %></div>
+        <% if (lastBattleEvent.damage > 0) { %>
+          <div class="toast-damage">-<%= lastBattleEvent.damage %> LP<% if (lastBattleEvent.damagedPlayerIsPlayer1 !== null) { %> (<%= lastBattleEvent.damagedPlayerIsPlayer1 ? player1.name : player2.name %>)<% } %></div>
+        <% } else if (lastBattleEvent.destroyedNames.length > 0) { %>
+          <div class="toast-damage" style="color:#66ccff;"><%= lastBattleEvent.destroyedNames.join(' & ') %> destroyed</div>
+        <% } %>
+      </div>
+      <% if (lastBattleEvent.targetImage) { %><img class="clash-right<%= lastBattleEvent.targetWasRevealed ? ' revealing' : '' %>" src="<%= lastBattleEvent.targetImage %>" /><% } %>
+    </div>
+  <% } %>
+
+  <% if (typeof lastRevealEvent !== 'undefined' && lastRevealEvent) { %>
+    <!-- Tournament rules require showing the OPPONENT exactly which card
+         a Deck search effect (Sangan, Witch of the Black Forest, ...)
+         found — this shows to both players, not just the searcher. -->
+    <div class="reveal-toast-overlay" id="revealToast">
+      <img class="reveal-toast-image" src="<%= lastRevealEvent.cardImage %>" />
+      <div class="reveal-toast-text">
+        <%= lastRevealEvent.playerName %> reveals and adds<br><strong><%= lastRevealEvent.cardName %></strong><br>to their hand
+      </div>
+    </div>
+  <% } %>
+
+  <!-- Summon/Set/Ritual/Spell/Trap/Flip callout banner — populated and
+       shown by playFieldEvent() in the script below, from lastFieldEvent. -->
+  <div class="field-event-toast" id="fieldEventToast">
+    <div class="fe-text" id="fieldEventText"></div>
+    <div class="fe-sub" id="fieldEventSub"></div>
+  </div>
+
+  <%
+    function avatarFor(name) {
+      if (/kaiba/i.test(name)) return '/images/Kaiba-MDDG.png';
+      if (/yugi/i.test(name)) return '/images/YamiYugi-MDDG.png';
+      return '';
+    }
+    function avatarClassFor(name) {
+      if (/kaiba/i.test(name)) return 'avatar-kaiba';
+      if (/yugi/i.test(name)) return 'avatar-yugi';
+      return '';
+    }
+  %>
+  <div class="top-header">
+    <div class="header-side opp-side">
+      <% const oppAvatar = avatarFor(player2.name); %>
+      <% if (oppAvatar) { %><img class="header-avatar <%= avatarClassFor(player2.name) %> <%= currentPlayer === player2 ? 'active-turn' : '' %>" src="<%= oppAvatar %>" alt="<%= player2.name %>"><% } %>
+      <div class="header-lp-name">
+        <span class="header-lp <%= avatarClassFor(player2.name) %>" id="headerLpOpp"><%= player2.lifePoints %></span>
+        <span class="header-name <%= avatarClassFor(player2.name) %> <%= currentPlayer === player2 ? 'active-turn' : '' %>"><%= player2.name %></span>
+      </div>
+    </div>
+    <div class="header-turn">
+      <div class="turn-label">TURN</div>
+      <div class="turn-num"><%= game.turn %></div>
+    </div>
+    <div class="header-side me-side">
+      <% const meAvatar = avatarFor(player1.name); %>
+      <% if (meAvatar) { %><img class="header-avatar <%= avatarClassFor(player1.name) %> <%= currentPlayer === player1 ? 'active-turn' : '' %>" src="<%= meAvatar %>" alt="<%= player1.name %>"><% } %>
+      <div class="header-lp-name">
+        <span class="header-name <%= avatarClassFor(player1.name) %> <%= currentPlayer === player1 ? 'active-turn' : '' %>"><%= player1.name %></span>
+        <span class="header-lp <%= avatarClassFor(player1.name) %>" id="headerLpMe"><%= player1.lifePoints %></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arena">
+
+    <!-- LEFT: CARD PREVIEW PANEL -->
+    <div class="preview-panel">
+      <div class="preview-image-wrap">
+        <img id="previewImage" />
+        <div class="preview-placeholder" id="previewPlaceholder">Hover a card to see its details here.</div>
+      </div>
+      <div class="preview-name" id="previewName"></div>
+      <div class="preview-stats" id="previewStats"></div>
+      <div class="preview-effect" id="previewEffect"></div>
+      <div class="preview-desc" id="previewDesc"></div>
+    </div>
+
+    <%
+      const PHASE_ORDER = ['draw', 'standby', 'm1', 'battle', 'm2', 'end'];
+      const curIdx = PHASE_ORDER.indexOf(phase);
+      const turnActive = isPlayer1Turn && waitingForAction && !isAwaitingResponse && !(typeof gameOver !== 'undefined' && gameOver);
+      const turnSideClass = isPlayer1Turn ? 'my-turn' : 'opp-turn';
+    %>
+
+    <!-- CENTER: FIELD -->
+    <div class="field-wrap">
+
+      <!-- OPPONENT LP -->
+      <div class="lp-bar opp" id="lpBarOpp">
+        <div class="lp-gauge-track"><div class="lp-gauge-fill opp" style="width: <%= Math.max(0, Math.min(100, player2.lifePoints / 8000 * 100)) %>%;"></div></div>
+        <span class="floating-damage" id="floatDamageOpp"></span>
+      </div>
+
+      <div class="opp-hand-strip" id="handOpp">
+        <% player2.zone.hand.forEach(() => { %><div class="card face-down"></div><% }) %>
+      </div>
+
+      <div class="field-mid">
+        <div class="side-col">
+          <div class="zone-counter" data-name="Field Spell Zone" data-desc="No Field Spell active.">FIELD</div>
+          <div class="zone-label">FIELD</div>
+          <div class="zone-counter" data-name="Extra Deck" data-desc="<%= player2.zone.extraDeck.length %> cards. Hidden — only <%= player2.name %> can look through their own Extra Deck.">EX<div class="count"><%= player2.zone.extraDeck.length %></div></div>
+          <div class="zone-label">EXTRA (<%= player2.name %>)</div>
+        </div>
+
+        <div class="field-center">
+          <div class="field-row">
+            <% player2.zone.spellTrap.forEach((gameCard, index) => { %>
+              <div class="slot" data-label="">
+                <% if(gameCard) { %>
+                  <% const pv = previewAttrs(gameCard, false); %>
+                  <div class="card opponent-spelltrap-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %>"
+                       data-instance-id="<%= gameCard.instanceId %>"
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                    <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" />
+                      <% if (pv.effectTag) { %><div class="kind-tag kind-<%= pv.effectKind %>"><%= pv.effectTag %></div><% } %>
+                    <% } %>
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+
+          <div class="field-row">
+            <% player2.zone.monster.forEach((gameCard, index) => { %>
+              <div class="slot">
+                <% if(gameCard) { %>
+                  <% const pv = previewAttrs(gameCard, false); %>
+                  <div class="card opponent-monster-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= gameCard.position %> <%= inBattlePhase && canAct ? 'attack-target' : '' %>"
+                       data-instance-id="<%= gameCard.instanceId %>"
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                    <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" />
+                      <% if (pv.effectTag) { %><div class="kind-tag kind-<%= pv.effectKind %>"><%= pv.effectTag %></div><% } %>
+                    <% } %>
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+
+        <div class="side-col">
+          <div class="zone-counter gy-clickable" id="banishOpp" data-name="Banished" data-desc="<%= player2.zone.banished.length %> cards. Click to view."
+               data-banish-cards='<%= JSON.stringify(player2.zone.banished.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            BAN<div class="count"><%= player2.zone.banished.length %></div>
+          </div>
+          <div class="zone-label">BANISH (<%= player2.name %>)</div>
+          <div class="zone-counter gy-clickable" id="gyOpp" data-name="Graveyard" data-desc="<%= player2.zone.graveyard.length %> cards. Click to view."
+               data-gy-cards='<%= JSON.stringify(player2.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            <% if(player2.zone.graveyard.length > 0) { %><img src="<%= player2.zone.graveyard[player2.zone.graveyard.length-1].card.imageCropped || player2.zone.graveyard[player2.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
+            <div class="count"><%= player2.zone.graveyard.length %></div>
+          </div>
+          <div class="zone-label">GY (<%= player2.name %>)</div>
+          <div class="zone-counter" id="deckOpp" data-name="Deck" data-desc="<%= player2.zone.deck.length %> cards remaining.">
+            🂠<div class="count"><%= player2.zone.deck.length %></div>
+          </div>
+          <div class="zone-label">DECK</div>
+        </div>
+      </div>
+
+      <!-- HORIZONTAL PHASE PILL: sits on the midline between the two
+           fields. Every phase is a real visible step (including
+           Draw/Standby/End) — the current phase passes on click; any
+           LATER phase jumps straight there (the AI side of a turn
+           always still visits every phase in between via the exact
+           same functions — this only changes what the human clicks
+           through). Blue = your turn, red = opponent's. -->
+      <div class="phase-pill-bar <%= turnSideClass %>">
+        <% [['draw','DP'], ['standby','SP'], ['m1','M1'], ['battle','BP'], ['m2','M2'], ['end','EP']].forEach(function(pair) { %>
+          <% const p = pair[0], label = pair[1]; const pIdx = PHASE_ORDER.indexOf(p); %>
+          <% const autoPass = (p === 'draw' || p === 'standby' || p === 'end'); %>
+          <% if (turnActive && phase === p) { %>
+            <form action="/game/next-phase" method="POST" style="margin:0;"<%- autoPass ? ' id="autoPhaseForm"' : '' %>>
+              <button type="submit" class="phase-icon active phase-icon-btn <%= turnSideClass %>" title="<%= autoPass ? 'Continues automatically' : 'Pass this phase' %>"><%= label %></button>
+            </form>
+          <% } else if (turnActive && pIdx > curIdx) { %>
+            <form action="/game/goto-phase" method="POST" style="margin:0;">
+              <input type="hidden" name="targetPhase" value="<%= p %>">
+              <button type="submit" class="phase-icon phase-icon-btn phase-icon-jump" title="Jump ahead to <%= label %>"><%= label %></button>
+            </form>
+          <% } else { %>
+            <div class="phase-icon <%= phase === p ? 'active' : '' %> <%= phase === p ? turnSideClass : '' %>"><%= label %></div>
+          <% } %>
+        <% }) %>
+      </div>
+
+      <div class="field-mid">
+        <div class="side-col">
+          <div class="zone-counter" data-name="Field Spell Zone" data-desc="No Field Spell active.">FIELD</div>
+          <div class="zone-label">FIELD</div>
+          <div class="zone-counter gy-clickable" id="edMe" data-name="Extra Deck" data-desc="<%= player1.zone.extraDeck.length %> cards. Click to view — you can look through your own Extra Deck any time."
+               data-ed-cards='<%= JSON.stringify(player1.zone.extraDeck.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            EX<div class="count"><%= player1.zone.extraDeck.length %></div>
+          </div>
+          <div class="zone-label">EXTRA (<%= player1.name %>)</div>
+        </div>
+
+        <div class="field-center">
+          <div class="field-row">
+            <% player1.zone.monster.forEach((gameCard, index) => { %>
+              <div class="slot">
+                <% if(gameCard) { %>
+                  <%
+                    const canReposition = canActMain &&
+                      !gameCard.state.hasChangedPositionThisTurn &&
+                      !gameCard.state.hasAttackedThisTurn &&
+                      !gameCard.state.hasBeenSummonedThisTurn &&
+                      !gameCard.modifiers.cannotChangePosition;
+                    const canDeclareAttack = canAct && inBattlePhase &&
+                      gameCard.faceUp && gameCard.position === 'attack' &&
+                      !gameCard.state.hasAttackedThisTurn &&
+                      !gameCard.modifiers.cannotAttack;
+                    const pv = previewAttrs(gameCard, true);
+                    const ignition = gameCard.faceUp && !gameCard.modifiers.effectsNegated ? game.getIgnitionMeta && game.getIgnitionMeta(gameCard.card.name) : null;
+                    const canUseIgnition = canActMain && ignition && ignition.canActivate(game, gameCard);
+                  %>
+                  <div class="card own-monster-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= gameCard.position %> <%= canReposition ? 'can-reposition' : '' %> <%= canDeclareAttack ? 'can-attack' : '' %>"
+                       data-instance-id="<%= gameCard.instanceId %>"
+                       data-zone-index="<%= index %>"
+                       data-can-reposition="<%= canReposition ? 'true' : 'false' %>"
+                       data-can-attack="<%= canDeclareAttack ? 'true' : 'false' %>"
+                       data-ritual-selectable="<%= (isMyRitualChoice && ritualChoice.candidateInstanceIds.includes(gameCard.instanceId)) ? 'true' : 'false' %>"
+                       data-level="<%= gameCard.card.level || 0 %>"
+                       data-name="<%= pv.name %>" data-desc="<%= pv.desc %>" data-effect="<%= pv.effectSummary %>" data-atk="<%= pv.atk %>" data-def="<%= pv.def %>" data-image="<%= pv.image %>" data-image-cropped="<%= pv.imageCropped %>">
+                    <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" />
+                      <% if (pv.effectTag) { %><div class="kind-tag kind-<%= pv.effectKind %>"><%= pv.effectTag %></div><% } %>
+                    <% } %>
+                    <% if (canUseIgnition) { %>
+                      <div class="effect-badge" data-action="monster-effect" data-instance-id="<%= gameCard.instanceId %>" data-needs-target="<%= ignition.needsTarget || '' %>" title="Activate Effect">FX</div>
+                    <% } %>
+                    <% if (canDeclareAttack) { %>
+                      <div class="sword-icon-wrap" title="Attack">
+                        <svg class="sword-icon" viewBox="0 0 24 60" xmlns="http://www.w3.org/2000/svg">
+                          <polygon points="12,0 16,11 16,44 8,44 8,11" />
+                          <rect x="3" y="42" width="18" height="5" rx="1.5" />
+                          <rect x="9.5" y="47" width="5" height="9" />
+                          <circle cx="12" cy="58" r="3.5" />
+                        </svg>
+                      </div>
+                    <% } %>
+                    <% if (gameCard.equippedUnion && canActMain && !gameCard.equippedUnion.state.hasUsedEffectThisTurn) { %>
+                      <div class="union-badge" data-action="unequip-union" data-host-instance-id="<%= gameCard.instanceId %>" title="Unequip <%= gameCard.equippedUnion.card.name %> and Special Summon it">UN</div>
+                    <% } %>
+                    <% if (isMyPositionChoice && positionChoice.instanceIds.includes(gameCard.instanceId)) { %>
+                      <div class="position-choice-toggle" data-instance-id="<%= gameCard.instanceId %>">
+                        <button type="button" class="pos-btn pos-atk <%= gameCard.position === 'attack' ? 'active' : '' %>" data-pos="attack">ATK</button>
+                        <button type="button" class="pos-btn pos-def <%= gameCard.position === 'defense' ? 'active' : '' %>" data-pos="defense">DEF</button>
+                      </div>
+                    <% } %>
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+
+          <div class="field-row">
+            <% player1.zone.spellTrap.forEach((gameCard, index) => { %>
+              <div class="slot">
+                <% if(gameCard) { %>
+                  <%
+                    const stMeta = game.getCardMeta(gameCard.card.name);
+                    let canActivateSet = false;
+                    if (stMeta && !gameCard.faceUp) {
+                      const trapTooYoung = stMeta.kind === 'trap' && gameCard.turnSet === game.turn;
+                      const lpOk = !(stMeta.cost && stMeta.cost.lp && gameCard.owner.lifePoints <= stMeta.cost.lp);
+                      if (isMyResponse) {
+                        canActivateSet = false; // handled via the response modal instead
+                      } else {
+                        canActivateSet = canActMain && stMeta.window !== 'response' && !trapTooYoung && lpOk;
+                      }
+                    }
+                    const pv2 = previewAttrs(gameCard, true);
+                  %>
+                  <div class="card own-spelltrap-card <%= gameCard.faceUp ? frameClass(gameCard.card) : 'face-down' %> <%= canActivateSet ? 'can-activate-set' : '' %>"
+                       data-instance-id="<%= gameCard.instanceId %>"
+                       data-can-activate="<%= canActivateSet ? 'true' : 'false' %>"
+                       data-needs-target="<%= stMeta ? (stMeta.needsTarget || '') : '' %>"
+                       data-name="<%= pv2.name %>" data-desc="<%= pv2.desc %>" data-effect="<%= pv2.effectSummary %>" data-image="<%= pv2.image %>" data-image-cropped="<%= pv2.imageCropped %>">
+                    <% if (gameCard.faceUp) { %><img src="<%= gameCard.card.image %>" />
+                      <% if (pv2.effectTag) { %><div class="kind-tag kind-<%= pv2.effectKind %>"><%= pv2.effectTag %></div><% } %>
+                    <% } %>
+                  </div>
+                <% } %>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+
+        <div class="side-col">
+          <div class="zone-counter gy-clickable" id="banishMe" data-name="Banished" data-desc="<%= player1.zone.banished.length %> cards. Click to view."
+               data-banish-cards='<%= JSON.stringify(player1.zone.banished.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            BAN<div class="count"><%= player1.zone.banished.length %></div>
+          </div>
+          <div class="zone-label">BANISH (<%= player1.name %>)</div>
+          <div class="zone-counter gy-clickable" id="gyMe" data-name="Graveyard" data-desc="<%= player1.zone.graveyard.length %> cards. Click to view."
+               data-gy-cards='<%= JSON.stringify(player1.zone.graveyard.map(gc => ({ name: gc.card.name, image: gc.card.imageCropped || gc.card.image, desc: gc.card.desc || "", atk: gc.card.atk !== undefined ? gc.card.atk : "", def: gc.card.def !== undefined ? gc.card.def : "", effect: game.getEffectInfo(gc.card.name).summary }))) %>'>
+            <% if(player1.zone.graveyard.length > 0) { %><img src="<%= player1.zone.graveyard[player1.zone.graveyard.length-1].card.imageCropped || player1.zone.graveyard[player1.zone.graveyard.length-1].card.image %>" /><% } else { %>GY<% } %>
+            <div class="count"><%= player1.zone.graveyard.length %></div>
+          </div>
+          <div class="zone-label">GY (<%= player1.name %>)</div>
+          <div class="zone-counter" id="deckMe" data-name="Deck" data-desc="<%= player1.zone.deck.length %> cards remaining.">🂠<div class="count"><%= player1.zone.deck.length %></div></div>
+          <div class="zone-label">DECK</div>
+        </div>
+      </div>
+
+      <% if (inBattlePhase && canAct && p2MonsterCount === 0) { %>
+        <div style="text-align:center;">
+          <div class="direct-attack-zone" id="directAttackZone" style="display:inline-block;">DIRECT ATTACK &gt;&gt;</div>
+        </div>
+      <% } %>
+
+      <!-- PLAYER HAND -->
+      <div class="hand-strip" id="handMe">
+        <% player1.zone.hand.forEach(gameCard => { %>
+          <%
+            const isMonsterCard = game.isMonster(gameCard);
+            const isSpellTrapCard = game.isSpellOrTrap(gameCard);
+            const meta = game.getCardMeta(gameCard.card.name);
+            const tributeInfo = isMonsterCard ? game.getRequiredTributesForSummon(player1, gameCard) : { required: 0, creditsUsed: 0 };
+            const requiredTributes = tributeInfo.required;
+            const canUseOffering = game.controlsActiveUltimateOffering(player1) && player1.lifePoints > 500;
+
+            const canNormalSummon = isMonsterCard && canActMain && (!actedThisWindow || canUseOffering) &&
+              player1.getMonstersOnField().length >= requiredTributes && !gameCard.card.type.includes('Ritual');
+
+            const freeSTSlot = player1.getFreeSpellTrapSlot() !== -1;
+            const canSetST = isSpellTrapCard && canActMain && freeSTSlot;
+
+            let canActivateSpell = false;
+            if (isSpellTrapCard && meta && meta.kind === 'spell' && meta.window !== 'response' && canActMain && freeSTSlot) {
+              const lpOk = !(meta.cost && meta.cost.lp && player1.lifePoints <= meta.cost.lp);
+              canActivateSpell = lpOk;
+            }
+
+            const showOverlay = canNormalSummon || canSetST || canActivateSpell;
+            const fxInfo = game.getEffectInfo(gameCard.card.name);
+            const pv3 = { name: gameCard.card.name, desc: gameCard.card.desc || "", atk: gameCard.card.atk !== undefined ? gameCard.card.atk : "", def: gameCard.card.def !== undefined ? gameCard.card.def : "", image: gameCard.card.image, imageCropped: gameCard.card.imageCropped || gameCard.card.image, effectSummary: fxInfo.summary };
+          %>
+          <div class="card player-hand-card <%= frameClass(gameCard.card) %>"
+               data-instance-id="<%= gameCard.instanceId %>"
+               data-summonable="<%= showOverlay ? 'true' : 'false' %>"
+               data-discard-selectable="<%= isMyDiscardChoice ? 'true' : 'false' %>"
+               data-ritual-selectable="<%= (isMyRitualChoice && ritualChoice.candidateInstanceIds.includes(gameCard.instanceId)) ? 'true' : 'false' %>"
+               data-level="<%= gameCard.card.level || 0 %>"
+               data-name="<%= pv3.name %>" data-desc="<%= pv3.desc %>" data-effect="<%= pv3.effectSummary %>" data-atk="<%= pv3.atk %>" data-def="<%= pv3.def %>" data-image="<%= pv3.image %>" data-image-cropped="<%= pv3.imageCropped %>">
+
+            <img src="<%= gameCard.card.image %>" />
+
+            <% if (canNormalSummon) { %>
+              <% const bonusTag = (actedThisWindow && canUseOffering) ? ' (500LP)' : ''; %>
+              <div class="action-btn-row">
+                <div class="action-btn" data-action="summon" data-required-tributes="<%= requiredTributes %>">SUMMON<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %><%= bonusTag %></div>
+                <div class="action-btn set-btn" data-action="set" data-required-tributes="<%= requiredTributes %>">SET<% if (requiredTributes > 0) { %> [<%= requiredTributes %>T]<% } %><%= bonusTag %></div>
+              </div>
+            <% } else if (isSpellTrapCard && (canActivateSpell || canSetST)) { %>
+              <div class="action-btn-row">
+                <% if (canActivateSpell) { %>
+                  <div class="action-btn activate-btn" data-action="activate-spell" data-needs-target="<%= meta.needsTarget || '' %>">ACTIVATE</div>
+                <% } %>
+                <% if (canSetST) { %>
+                  <div class="action-btn set-btn" data-action="set-spell-trap">SET</div>
+                <% } %>
+              </div>
+            <% } else { %>
+              <div class="summon-btn">CANNOT PLAY</div>
+            <% } %>
+          </div>
+        <% }) %>
+      </div>
+
+      <!-- PLAYER LP -->
+      <div class="lp-bar me" id="lpBarMe">
+        <div class="lp-gauge-track"><div class="lp-gauge-fill me" style="width: <%= Math.max(0, Math.min(100, player1.lifePoints / 8000 * 100)) %>%;"></div></div>
+        <span class="floating-damage" id="floatDamageMe"></span>
+      </div>
+
+      <!-- DUEL LOG -->
+      <div class="duel-log" id="duelLog">
+        <% (typeof log !== 'undefined' ? log : []).forEach(line => { %><div><%= line %></div><% }) %>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- GRAVEYARD VIEWER -->
+  <div class="gy-modal-overlay" id="gyModalOverlay">
+    <div class="gy-modal">
+      <h3 id="gyModalTitle">Graveyard</h3>
+      <div class="gy-modal-grid" id="gyModalGrid"></div>
+      <button class="gy-modal-close" id="gyModalClose">Close</button>
+    </div>
+  </div>
+
+  <!-- TARGETING PANEL (used by Spells/Traps that need a target, and attack selection) -->
+  <div id="targetPanel">
+    <span id="targetPanelText"></span>
+    <select id="targetPanelSelect" style="display:none;"
+            data-gy-options='<%= JSON.stringify(gyMonsters) %>'
+            data-fusion-options='<%= JSON.stringify(fusionOptions) %>'>
+    </select>
+    <button id="targetPanelConfirm" style="display:none;">Confirm</button>
+    <button id="targetPanelCancel">Cancel</button>
+  </div>
+
+  <!-- END-PHASE HAND-SIZE DISCARD CHOICE — click cards in your hand to
+       select exactly discardChoice.count of them, then confirm. Real
+       rule: this is always the player's own choice, never automatic. -->
+  <% if (isMyDiscardChoice) { %>
+    <div id="discardChoicePanel" data-required="<%= discardChoice.count %>">
+      <span id="discardChoiceText">Hand size limit: choose <%= discardChoice.count %> card<%= discardChoice.count > 1 ? 's' : '' %> to discard (<span id="discardChoiceSelectedCount">0</span>/<%= discardChoice.count %> selected)</span>
+      <button id="discardChoiceConfirm" disabled>Confirm Discard</button>
+    </div>
+  <% } %>
+
+  <!-- CYBER JAR-STYLE ATTACK/DEFENSE POSITION CHOICE — the affected
+       monsters already show ATK/DEF toggle buttons on the field itself
+       (see position-choice-toggle above); this is just the confirm bar. -->
+  <% if (isMyPositionChoice) { %>
+    <div id="positionChoicePanel">
+      <span>Choose Attack or Defense Position for each newly Special Summoned monster, then confirm.</span>
+      <button id="positionChoiceConfirm">Confirm Positions</button>
+    </div>
+  <% } %>
+
+  <!-- RITUAL SUMMON TRIBUTE MATERIAL CHOICE — click eligible monsters in
+       your hand or on your field (highlighted below) to select them as
+       Tribute material, until the running total meets the requirement. -->
+  <% if (isMyRitualChoice) { %>
+    <div id="ritualChoicePanel" data-required="<%= ritualChoice.requiredLevel %>">
+      <span id="ritualChoiceText">Choose Tribute material totaling Level <%= ritualChoice.requiredLevel %>+ (<span id="ritualChoiceTotal">0</span>/<%= ritualChoice.requiredLevel %>)</span>
+      <button id="ritualChoiceConfirm" disabled>Confirm Tribute</button>
+    </div>
+  <% } %>
+
+  <!-- BIND SELECTION ENGINE -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+
+      const dl = document.getElementById("duelLog");
+      if (dl) dl.scrollTop = dl.scrollHeight;
+
+      // Auto-advance the AI's turn one visible action at a time, giving
+      // the human a moment to actually see what just happened before the
+      // next one plays out. "Continue Now" skips the wait.
+      const aiContinueForm = document.getElementById("aiContinueForm");
+      if (aiContinueForm) {
+        setTimeout(() => aiContinueForm.submit(), 2200);
+      }
+
+      // Draw/Standby/End Phase have nothing to decide (for either
+      // player) — they're still shown as their own real step so you can
+      // see the card get drawn etc., but they pass themselves after a
+      // brief beat instead of waiting on a click every single turn.
+      const autoPhaseForm = document.getElementById("autoPhaseForm");
+      if (autoPhaseForm) {
+        setTimeout(() => autoPhaseForm.submit(), 600);
+      }
+
+      // Floating "-damage" number over whichever LP bar just got hit,
+      // PLUS the big LP number in the header ticking down in real time
+      // rather than just snapping to the new value on page load.
+      <% if (typeof lastBattleEvent !== 'undefined' && lastBattleEvent && lastBattleEvent.damage > 0 && lastBattleEvent.damagedPlayerIsPlayer1 !== null) { %>
+        (function() {
+          const targetId = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? "floatDamageMe" : "floatDamageOpp";
+          const el = document.getElementById(targetId);
+          if (el) {
+            el.textContent = "-<%= lastBattleEvent.damage %>";
+            requestAnimationFrame(() => el.classList.add("show"));
+          }
+
+          const headerId = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? "headerLpMe" : "headerLpOpp";
+          const headerEl = document.getElementById(headerId);
+          if (headerEl) {
+            const damage = <%= lastBattleEvent.damage %>;
+            const endLp = <%= lastBattleEvent.damagedPlayerIsPlayer1 %> ? <%= player1.lifePoints %> : <%= player2.lifePoints %>;
+            const startLp = endLp + damage;
+            const durationMs = Math.min(1400, Math.max(500, damage / 4));
+            const startTime = performance.now();
+            headerEl.classList.add("lp-hit");
+            function tick(now) {
+              const t = Math.min(1, (now - startTime) / durationMs);
+              const eased = 1 - Math.pow(1 - t, 2);
+              const shown = Math.round(startLp - (startLp - endLp) * eased);
+              headerEl.textContent = shown;
+              if (t < 1) requestAnimationFrame(tick);
+              else headerEl.classList.remove("lp-hit");
+            }
+            headerEl.textContent = startLp;
+            requestAnimationFrame(tick);
+          }
+        })();
+      <% } %>
+
+      const toast = document.getElementById("battleToast");
+      if (toast) setTimeout(() => { toast.style.display = "none"; }, 2100);
+
+      // ---------------------------------------------------
+      // DRAW / DISCARD ANIMATIONS (Pot of Greed, Card Destruction, etc.)
+      // Spawns real flying-card elements between the actual on-screen
+      // zone positions, one card at a time.
+      // ---------------------------------------------------
+      function spawnFlyingCard(fromRect, toRect, delay, isDiscard, label) {
+        setTimeout(() => {
+          const card = document.createElement("div");
+          card.className = "flying-card" + (isDiscard ? " to-graveyard" : "");
+          card.style.left = fromRect.left + "px";
+          card.style.top = fromRect.top + "px";
+          document.body.appendChild(card);
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              card.style.left = (toRect.left + toRect.width / 2 - 21) + "px";
+              card.style.top = (toRect.top + toRect.height / 2 - 30) + "px";
+              card.style.transform = "rotate(" + (isDiscard ? "15deg" : "0deg") + ")";
+              card.style.opacity = "0.15";
+            });
+          });
+
+          setTimeout(() => card.remove(), 650);
+        }, delay);
+      }
+
+      function animateCardBatch(fromEl, toEl, count, isDiscard, startDelay) {
+        if (!fromEl || !toEl || count <= 0) return 0;
+        const fromRect = fromEl.getBoundingClientRect();
+        const toRect = toEl.getBoundingClientRect();
+        const STAGGER = 260;
+        for (let i = 0; i < count; i++) {
+          spawnFlyingCard(fromRect, toRect, startDelay + i * STAGGER, isDiscard, "");
+        }
+        return startDelay + count * STAGGER;
+      }
+
+      // A floating copy of a card that's ALREADY gone from the field by
+      // the time this page renders (one-shot Spells/Traps, Flip monsters
+      // that destroy themselves like Cyber Jar). Web Animations API
+      // rather than CSS classes so it can't fight any other transform.
+      function spawnGhostCard(imageUrl, kind) {
+        const ghost = document.createElement("div");
+        ghost.className = "ghost-card";
+        const img = document.createElement("img");
+        img.src = imageUrl;
+        ghost.appendChild(img);
+        document.body.appendChild(ghost);
+        const intro = kind === "flip"
+          ? [{ opacity: 1, transform: "translate(-50%,-50%) rotateY(90deg) scale(0.9)" },
+             { opacity: 1, transform: "translate(-50%,-50%) rotateY(0deg) scale(1)" }]
+          : [{ opacity: 0, transform: "translate(-50%,-50%) scale(0.5)" },
+             { opacity: 1, transform: "translate(-50%,-50%) scale(1)" }];
+        ghost.animate(intro, { duration: 600, fill: "forwards", easing: "ease-out" });
+        return ghost;
+      }
+      function sendGhostToGraveyard(ghost, gyEl) {
+        const r = gyEl.getBoundingClientRect();
+        const dx = (r.left + r.width / 2) - window.innerWidth / 2;
+        const dy = (r.top + r.height / 2) - window.innerHeight * 0.55;
+        const anim = ghost.animate([
+          { opacity: 1, transform: "translate(-50%,-50%) scale(1)" },
+          { opacity: 0.25, transform: "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px)) scale(0.35)" }
+        ], { duration: 650, fill: "forwards", easing: "ease-in" });
+        anim.onfinish = () => {
+          ghost.remove();
+          gyEl.classList.remove("gy-pulse");
+          void gyEl.offsetWidth;
+          gyEl.classList.add("gy-pulse");
+          setTimeout(() => gyEl.classList.remove("gy-pulse"), 900);
+        };
+      }
+
+      // Pulse a Graveyard icon once per card landing in it, staggered —
+      // reads as "several cards landing one after another" for a mass
+      // destruction (Dark Hole, Cyber Jar's destroy step), where the
+      // monsters themselves are already gone from the field by the time
+      // this page renders (moved to the Graveyard server-side, same
+      // request) so there are no card elements left to actually fly.
+      function pulseGraveyardTimes(gyEl, times, startAt) {
+        const STAGGER = 200;
+        const n = Math.min(times, 6);
+        for (let i = 0; i < n; i++) {
+          setTimeout(() => {
+            gyEl.classList.remove("gy-pulse");
+            void gyEl.offsetWidth;
+            gyEl.classList.add("gy-pulse");
+            setTimeout(() => gyEl.classList.remove("gy-pulse"), 700);
+          }, startAt + i * STAGGER);
+        }
+        return startAt + n * STAGGER + 500;
+      }
+
+      // Plays whatever a card's effect actually DID, in the order it
+      // happens: mass-destroyed monsters landing in the Graveyard first,
+      // then cards discarded from hand, then cards drawn/revealed.
+      // Returns when the last of it finishes so callers can chain off it.
+      function playDrawDiscardAnimations(startDelay) {
+        const destroyEvents = <%- JSON.stringify(typeof lastDestroyEvent !== 'undefined' ? lastDestroyEvent : null) %>;
+        const discardEvents = <%- JSON.stringify(typeof lastDiscardEvent !== 'undefined' ? lastDiscardEvent : null) %>;
+        const drawEvents = <%- JSON.stringify(typeof lastDrawEvent !== 'undefined' ? lastDrawEvent : null) %>;
+
+        let t = startDelay;
+
+        if (destroyEvents && destroyEvents.length) {
+          let destroyEnd = t;
+          destroyEvents.forEach(ev => {
+            const gyEl = document.getElementById(ev.playerIsPlayer1 ? "gyMe" : "gyOpp");
+            if (gyEl) destroyEnd = Math.max(destroyEnd, pulseGraveyardTimes(gyEl, ev.count, t));
+          });
+          t = destroyEnd + 200;
+        }
+
+        if (discardEvents) {
+          discardEvents.forEach(ev => {
+            const handEl = document.getElementById(ev.playerIsPlayer1 ? "handMe" : "handOpp");
+            const gyEl = document.getElementById(ev.playerIsPlayer1 ? "gyMe" : "gyOpp");
+            t = Math.max(t, animateCardBatch(handEl, gyEl, ev.count, true, t));
+          });
+          t += 200;
+        }
+
+        if (drawEvents) {
+          drawEvents.forEach(ev => {
+            const deckEl = document.getElementById(ev.playerIsPlayer1 ? "deckMe" : "deckOpp");
+            const handEl = document.getElementById(ev.playerIsPlayer1 ? "handMe" : "handOpp");
+            t = Math.max(t, animateCardBatch(deckEl, handEl, ev.count, false, t));
+          });
+        }
+
+        return t;
+      }
+
+      // ---------------------------------------------------
+      // FIELD EVENTS — Summon / Set / Ritual (Tribute) Summon /
+      // Spell activate / Trap activate / Flip effect. A card actually
+      // landing on the field just now, as opposed to the plain
+      // fade-in every card gets on every re-render.
+      //
+      // This is a small sequenced "cutscene," not several things firing
+      // at once: (1) the activation flash plays immediately, (2) only
+      // once that's had a moment to read does whatever the card actually
+      // DID become visible (cards drawn/discarded — Card Destruction,
+      // Pot of Greed, etc. — reusing the same flying-card animation
+      // draws/discards already use elsewhere), and (3) only after that
+      // has finished does a one-shot Spell/Trap actually get sent to the
+      // Graveyard. Without this, all three used to play simultaneously,
+      // which read as "it just teleports to the Graveyard" with no
+      // visible connection to what it did along the way.
+      // ---------------------------------------------------
+      <%
+        // Redact identity for anything landing FACE-DOWN — a Set
+        // Monster/Spell/Trap never shows its real art in this banner
+        // for either player, matching how Master Duel/Tag Force only
+        // ever show a plain card-back slam for a Set, never a peek at
+        // what it actually is (the owner already knows; that's not
+        // what this banner is for). Spell vs Trap is ALSO never
+        // revealed for a Set — a face-down Spell/Trap Zone card looks
+        // identical either way until it's actually activated, so the
+        // engine only ever sends the single unified "set-spelltrap"
+        // kind here, never "spell-set"/"trap-set".
+        let fieldEventForClient = null;
+        if (typeof lastFieldEvent !== 'undefined' && lastFieldEvent) {
+          const fe = lastFieldEvent;
+          const isSetKind = fe.kind === 'set-monster' || fe.kind === 'set-spelltrap';
+          fieldEventForClient = {
+            kind: fe.kind,
+            instanceId: fe.instanceId,
+            position: fe.position,
+            tributedNames: fe.tributedNames || [],
+            cardName: isSetKind ? null : fe.cardName,
+            cardImage: isSetKind ? null : fe.cardImage,
+            staysOnField: fe.staysOnField !== false,
+            isPlayer1: fe.isPlayer1
+          };
+        }
+      %>
+      (function runFieldEventAnimation() {
+        const fe = <%- JSON.stringify(fieldEventForClient) %>;
+
+        if (!fe) {
+          // Nothing landed on the field this render, but a card effect
+          // might still have drawn/discarded cards on its own (e.g. a
+          // Trap Hole-style response, or an ignition effect) — those
+          // still deserve to play, just with no flash to wait behind.
+          playDrawDiscardAnimations(0);
+          return;
+        }
+
+        const KIND_META = {
+          "summon":         { flashClass: "fx-land-summon", label: "NORMAL SUMMON!",       toastClass: "fe-summon" },
+          "set-monster":    { flashClass: "fx-land-set",     label: "SET!",                 toastClass: "fe-set" },
+          "ritual":         { flashClass: "fx-land-ritual",  label: "RITUAL SUMMON!",       toastClass: "fe-ritual" },
+          "set-spelltrap":  { flashClass: "fx-land-set",     label: "SET!",                 toastClass: "fe-set" },
+          "spell-activate": { flashClass: "fx-land-spell",   label: "SPELL CARD ACTIVATE!", toastClass: "fe-spell" },
+          "trap-activate":  { flashClass: "fx-land-trap",    label: "TRAP CARD ACTIVATE!",  toastClass: "fe-trap" },
+          "flip":           { flashClass: "fx-land-flip",    label: "FLIP EFFECT!",         toastClass: "fe-flip" }
+        };
+        const meta = KIND_META[fe.kind];
+        if (!meta) { playDrawDiscardAnimations(0); return; }
+
+        // A Normal/Set Summon with 1+ Tributes is a Tribute Summon,
+        // however many were tributed — the TCG only ever calls it that,
+        // regardless of the count.
+        let label = meta.label;
+        if ((fe.kind === "summon" || fe.kind === "set-monster") && fe.tributedNames.length > 0) {
+          label = "TRIBUTE SUMMON!";
+        }
+
+        const cardEl = document.querySelector('[data-instance-id="' + fe.instanceId + '"]');
+        if (cardEl) {
+          cardEl.classList.remove(meta.flashClass);
+          void cardEl.offsetWidth; // force reflow so re-adding the class always restarts the animation
+          cardEl.classList.add(meta.flashClass);
+          setTimeout(() => cardEl.classList.remove(meta.flashClass), 1500);
+        }
+
+        const toast = document.getElementById("fieldEventToast");
+        const text = document.getElementById("fieldEventText");
+        const sub = document.getElementById("fieldEventSub");
+        if (toast && text) {
+          text.textContent = label;
+          sub.textContent = fe.cardName
+            ? (fe.cardName + (fe.tributedNames.length ? "  (Tributed: " + fe.tributedNames.join(", ") + ")" : ""))
+            : "";
+          toast.className = "field-event-toast " + meta.toastClass;
+          requestAnimationFrame(() => toast.classList.add("show"));
+          setTimeout(() => toast.classList.remove("show"), 1500);
+        }
+
+        // Give the flash a beat to actually register before whatever the
+        // card DID becomes visible (cards drawn/discarded/destroyed),
+        // then only once that's finished send the spent card to the
+        // Graveyard — see the big comment above this IIFE for why.
+        const EFFECT_DELAY = 900;
+
+        // The card itself may already be gone from the field by the time
+        // this page renders — a one-shot Spell/Trap moved to the
+        // Graveyard server-side right after resolving, or a Flip monster
+        // like Cyber Jar that destroys ITSELF as part of its own effect.
+        // With no element left to animate, show a floating "ghost" copy
+        // instead (only ever for face-up kinds: activations and flips —
+        // the engine never sends art for a Set) so you actually SEE the
+        // card appear, do its thing, then leave for the Graveyard.
+        const ghostable = !cardEl && fe.cardImage &&
+          (fe.kind === "flip" || ((fe.kind === "spell-activate" || fe.kind === "trap-activate") && !fe.staysOnField));
+        const ghost = ghostable ? spawnGhostCard(fe.cardImage, fe.kind) : null;
+
+        const drawDiscardEndTime = playDrawDiscardAnimations(EFFECT_DELAY);
+
+        const leavesForGraveyard =
+          (fe.kind === "spell-activate" || fe.kind === "trap-activate") && !fe.staysOnField;
+        if (ghost || leavesForGraveyard) {
+          const graveyardTime = Math.max(EFFECT_DELAY, drawDiscardEndTime) + 150;
+          setTimeout(() => {
+            const gyEl = document.getElementById(fe.isPlayer1 ? "gyMe" : "gyOpp");
+            if (ghost && gyEl) {
+              sendGhostToGraveyard(ghost, gyEl);
+            } else if (cardEl && leavesForGraveyard) {
+              // Rare: the card is somehow still findable (an effect that
+              // fizzled before the engine's own graveyard-cleanup step).
+              cardEl.classList.add("fx-to-graveyard");
+            } else if (gyEl && leavesForGraveyard) {
+              pulseGraveyardTimes(gyEl, 1, 0);
+            }
+          }, graveyardTime);
+        }
+      })();
+
+      // ---------------------------------------------------
+      // CARD LIST VIEWER — shared modal for Graveyard, Extra Deck (own
+      // side only — see the click handlers below), and Banished cards.
+      // ---------------------------------------------------
+      function openCardListModal(cards, title) {
+        document.getElementById("gyModalTitle").textContent = title;
+        const grid = document.getElementById("gyModalGrid");
+        grid.innerHTML = "";
+        if (cards.length === 0) {
+          grid.innerHTML = "<p style='color:#789; grid-column: 1 / -1;'>Empty.</p>";
+        } else {
+          cards.forEach(c => {
+            const wrap = document.createElement("div");
+            wrap.className = "gy-modal-card";
+            wrap.setAttribute("data-name", c.name);
+            wrap.setAttribute("data-desc", c.desc || "");
+            wrap.setAttribute("data-atk", c.atk !== undefined ? c.atk : "");
+            wrap.setAttribute("data-def", c.def !== undefined ? c.def : "");
+            wrap.setAttribute("data-effect", c.effect || "");
+            wrap.setAttribute("data-image", c.image || "");
+            const img = document.createElement("img");
+            img.src = c.image;
+            const name = document.createElement("div");
+            name.className = "gname";
+            name.textContent = c.name;
+            wrap.appendChild(img);
+            wrap.appendChild(name);
+            grid.appendChild(wrap);
+            bindCardPreview(wrap);
+          });
+        }
+        document.getElementById("gyModalOverlay").style.display = "flex";
+      }
+      function openZoneModal(zoneEl, dataAttr, label) {
+        let cards = [];
+        try { cards = JSON.parse(zoneEl.getAttribute(dataAttr) || "[]"); } catch (e) { cards = []; }
+        openCardListModal(cards, label + " (" + cards.length + ")");
+      }
+
+      const gyOpp = document.getElementById("gyOpp");
+      if (gyOpp) gyOpp.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(gyOpp, "data-gy-cards", "<%= player2.name %>'s Graveyard"); });
+
+      const gyMe = document.getElementById("gyMe");
+      if (gyMe) gyMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(gyMe, "data-gy-cards", "<%= player1.name %>'s Graveyard"); });
+
+      // Extra Deck: yours is an open book any time (real rule — a player
+      // may look through their own Extra Deck whenever they like) but the
+      // opponent's is never inspectable, so only YOUR zone gets a click
+      // handler / card data at all — see the template below, which
+      // simply never renders data-ed-cards or the "clickable" styling
+      // for the opponent's Extra Deck counter.
+      const edMe = document.getElementById("edMe");
+      if (edMe) edMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(edMe, "data-ed-cards", "<%= player1.name %>'s Extra Deck"); });
+
+      // Banished cards are face-up/public in this engine, so both
+      // players' Banish Zones are viewable, same as the Graveyard.
+      const banishOpp = document.getElementById("banishOpp");
+      if (banishOpp) banishOpp.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(banishOpp, "data-banish-cards", "<%= player2.name %>'s Banished Cards"); });
+      const banishMe = document.getElementById("banishMe");
+      if (banishMe) banishMe.addEventListener("click", (e) => { e.stopPropagation(); openZoneModal(banishMe, "data-banish-cards", "<%= player1.name %>'s Banished Cards"); });
+
+      document.getElementById("gyModalClose").addEventListener("click", () => {
+        document.getElementById("gyModalOverlay").style.display = "none";
+      });
+      document.getElementById("gyModalOverlay").addEventListener("click", (e) => {
+        if (e.target.id === "gyModalOverlay") e.currentTarget.style.display = "none";
+      });
+
+      function postForm(action, fields) {
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = action;
+        Object.entries(fields).forEach(([name, value]) => {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = name;
+          input.value = value;
+          form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        form.submit();
+      }
+
+      // ---------------------------------------------------
+      // CARD PREVIEW PANEL (hover any card with data-name — including
+      // ones created dynamically later, like the Graveyard viewer's cards)
+      // ---------------------------------------------------
+      const previewImage = document.getElementById("previewImage");
+      const previewPlaceholder = document.getElementById("previewPlaceholder");
+      const previewName = document.getElementById("previewName");
+      const previewStats = document.getElementById("previewStats");
+      const previewEffect = document.getElementById("previewEffect");
+      const previewDesc = document.getElementById("previewDesc");
+
+      function showCardPreview(el) {
+        const name = el.getAttribute("data-name");
+        if (!name) return;
+        previewName.textContent = name;
+        previewDesc.textContent = el.getAttribute("data-desc") || "";
+        const atk = el.getAttribute("data-atk");
+        const def = el.getAttribute("data-def");
+        previewStats.textContent = (atk || def) ? ("ATK/" + (atk || "?") + "  DEF/" + (def || "?")) : "";
+        // What does this card actually DO? Filled in from Effects.js's
+        // getEffectInfo on the server, empty string for a face-down card
+        // (identity hidden) — falls back to a plain "no effect" note so
+        // it's never ambiguous whether a card was skipped or just vanilla.
+        const fx = el.getAttribute("data-effect");
+        if (fx) {
+          previewEffect.textContent = fx;
+          previewEffect.style.display = "block";
+        } else {
+          previewEffect.style.display = "none";
+        }
+        const croppedImg = el.getAttribute("data-image-cropped");
+        const img = croppedImg || el.getAttribute("data-image");
+        if (img) {
+          previewImage.src = img;
+          previewImage.style.display = "block";
+          previewPlaceholder.style.display = "none";
+        } else {
+          previewImage.style.display = "none";
+          previewPlaceholder.style.display = "block";
+          previewPlaceholder.textContent = "(No image — face-down card)";
+        }
+      }
+
+      function bindCardPreview(el) {
+        el.addEventListener("mouseenter", () => showCardPreview(el));
+      }
+
+      document.querySelectorAll("[data-name]").forEach(bindCardPreview);
+
+      // ---------------------------------------------------
+      // TARGETING FLOW (shared by Spells/Traps that need a target)
+      // ---------------------------------------------------
+      let pendingActivation = null; // { endpoint, instanceId, needsTarget }
+      let pendingSummon = null;     // { endpoint, instanceId, requiredTributes, selected: [] }
+      let selectedAttackerId = null;
+
+      function enterTargetingMode(needsTarget) {
+        let selector = "";
+        if (needsTarget === "monster") selector = ".own-monster-card, .opponent-monster-card";
+        else if (needsTarget === "spellTrap") selector = ".own-spelltrap-card, .opponent-spelltrap-card";
+        if (selector) document.querySelectorAll(selector).forEach(el => el.classList.add("target-eligible"));
+      }
+
+      function exitTargetingMode() {
+        document.querySelectorAll(".target-eligible").forEach(el => el.classList.remove("target-eligible"));
+      }
+
+      function clearAttackerSelection() {
+        if (selectedAttackerId) resetSwordAim(selectedAttackerId);
+        selectedAttackerId = null;
+        document.querySelectorAll(".own-monster-card.attacker-selected").forEach(el => el.classList.remove("attacker-selected"));
+        document.querySelectorAll(".opponent-monster-card.target-eligible").forEach(el => el.classList.remove("target-eligible"));
+        const daz = document.getElementById("directAttackZone");
+        if (daz) daz.classList.remove("target-eligible-zone");
+      }
+
+      function populateSelect(attrName) {
+        const select = document.getElementById("targetPanelSelect");
+        let options = [];
+        try { options = JSON.parse(select.getAttribute(attrName) || "[]"); } catch (e) { options = []; }
+        select.innerHTML = "";
+        options.forEach(opt => {
+          const o = document.createElement("option");
+          o.value = opt.id;
+          o.textContent = opt.label;
+          select.appendChild(o);
+        });
+        return options.length;
+      }
+
+      function openTargetPanel(mode) {
+        const panel = document.getElementById("targetPanel");
+        const text = document.getElementById("targetPanelText");
+        const select = document.getElementById("targetPanelSelect");
+        const confirmBtn = document.getElementById("targetPanelConfirm");
+
+        panel.style.display = "flex";
+
+        if (mode === "graveyardMonster") {
+          const count = populateSelect("data-gy-options");
+          text.textContent = count > 0 ? "Choose a monster from a Graveyard:" : "No valid monster in any Graveyard.";
+          select.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.disabled = false;
+        } else if (mode === "fusionMonster") {
+          const count = populateSelect("data-fusion-options");
+          text.textContent = count > 0 ? "Choose a Fusion Monster to Summon:" : "You don't have the materials for any Fusion Monster right now.";
+          select.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.style.display = count > 0 ? "inline-block" : "none";
+          confirmBtn.disabled = false;
+        } else if (mode === "tribute") {
+          select.style.display = "none";
+          confirmBtn.style.display = "inline-block";
+          confirmBtn.disabled = true;
+          updateTributePanelText();
+        } else if (mode === "attack") {
+          select.style.display = "none";
+          confirmBtn.style.display = "none";
+        } else {
+          text.textContent = mode === "monster"
+            ? "Click a monster on the field to target it."
+            : "Click a Spell/Trap card on the field to target it.";
+          select.style.display = "none";
+          confirmBtn.style.display = "none";
+        }
+      }
+
+      function updateTributePanelText() {
+        if (!pendingSummon) return;
+        const text = document.getElementById("targetPanelText");
+        const confirmBtn = document.getElementById("targetPanelConfirm");
+        text.textContent = "Select " + pendingSummon.requiredTributes + " tribute monster(s) from your field: " +
+          pendingSummon.selected.length + "/" + pendingSummon.requiredTributes + " chosen.";
+        confirmBtn.disabled = pendingSummon.selected.length !== pendingSummon.requiredTributes;
+      }
+
+      function closeTargetPanel() {
+        document.getElementById("targetPanel").style.display = "none";
+        exitTargetingMode();
+        clearAttackerSelection();
+        pendingActivation = null;
+        pendingSummon = null;
+        // Bring the response modal back if we hid it to let the player
+        // click a field target underneath it.
+        const overlay = document.getElementById("responseModalOverlay");
+        if (overlay) overlay.style.display = "flex";
+      }
+
+      function startActivation(endpoint, instanceId, needsTarget) {
+        if (!needsTarget) {
+          postForm(endpoint, { instanceId });
+          return;
+        }
+        pendingActivation = { endpoint, instanceId, needsTarget };
+        openTargetPanel(needsTarget);
+        if (needsTarget !== "graveyardMonster") enterTargetingMode(needsTarget);
+      }
+
+      function startSummonFlow(endpoint, instanceId, requiredTributes) {
+        if (!requiredTributes) {
+          postForm(endpoint, { instanceId });
+          return;
+        }
+        pendingSummon = { endpoint, instanceId, requiredTributes, selected: [] };
+        document.querySelectorAll(".own-monster-card").forEach(el => el.classList.add("target-eligible"));
+        openTargetPanel("tribute");
+      }
+
+      function finalizeTarget(targetInstanceId) {
+        if (!pendingActivation) return;
+        postForm(pendingActivation.endpoint, {
+          instanceId: pendingActivation.instanceId,
+          targetInstanceId: targetInstanceId
+        });
+      }
+
+      document.getElementById("targetPanelConfirm").addEventListener("click", () => {
+        if (pendingSummon) {
+          postForm(pendingSummon.endpoint, {
+            instanceId: pendingSummon.instanceId,
+            tributeIndices: pendingSummon.selected.join(",")
+          });
+          return;
+        }
+        const select = document.getElementById("targetPanelSelect");
+        finalizeTarget(select.value);
+      });
+      document.getElementById("targetPanelCancel").addEventListener("click", closeTargetPanel);
+
+      // ---------------------------------------------------
+      // HAND CARDS: select -> choose Summon/Set/Activate
+      // ---------------------------------------------------
+      const handCards = document.querySelectorAll(".player-hand-card");
+
+      handCards.forEach(card => {
+        card.addEventListener("click", (e) => {
+          // During the End Phase discard-choice window, or a Ritual
+          // Summon's Tribute-material choice, this card has a completely
+          // separate click handler (below) that owns clicks on it
+          // entirely — skip this one rather than risk any ambiguity
+          // between two listeners on the same element.
+          if (card.getAttribute("data-discard-selectable") === "true") return;
+          if (card.getAttribute("data-ritual-selectable") === "true") return;
+
+          e.preventDefault();
+          e.stopPropagation();
+
+          const instanceId = card.getAttribute("data-instance-id");
+          const summonable = card.getAttribute("data-summonable") === "true";
+
+          if (e.target.closest(".action-btn")) {
+            const btn = e.target.closest(".action-btn");
+            const action = btn.getAttribute("data-action");
+            if (action === "summon") startSummonFlow("/game/summon", instanceId, parseInt(btn.getAttribute("data-required-tributes") || "0", 10));
+            else if (action === "set") startSummonFlow("/game/set", instanceId, parseInt(btn.getAttribute("data-required-tributes") || "0", 10));
+            else if (action === "set-spell-trap") postForm("/game/set-spell-trap", { instanceId });
+            else if (action === "activate-spell") {
+              const needsTarget = btn.getAttribute("data-needs-target");
+              startActivation("/game/activate-spell", instanceId, needsTarget || null);
+            }
+            return;
+          }
+
+          if (!summonable) return;
+
+          const isAlreadySelected = card.classList.contains("selected");
+          handCards.forEach(c => c.classList.remove("selected"));
+          if (!isAlreadySelected) card.classList.add("selected");
+        });
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".player-hand-card")) {
+          handCards.forEach(c => c.classList.remove("selected"));
+        }
+      }, true);
+
+      // ---------------------------------------------------
+      // END-PHASE HAND-SIZE DISCARD CHOICE: click hand cards to select
+      // exactly discardChoice.count of them, then Confirm.
+      // ---------------------------------------------------
+      const discardPanel = document.getElementById("discardChoicePanel");
+      if (discardPanel) {
+        const required = parseInt(discardPanel.getAttribute("data-required"), 10);
+        const countLabel = document.getElementById("discardChoiceSelectedCount");
+        const confirmBtn = document.getElementById("discardChoiceConfirm");
+        const selectableCards = document.querySelectorAll('.player-hand-card[data-discard-selectable="true"]');
+
+        function updateDiscardUI() {
+          const selected = document.querySelectorAll(".player-hand-card.discard-selected").length;
+          countLabel.textContent = selected;
+          confirmBtn.disabled = selected !== required;
+        }
+
+        selectableCards.forEach(card => {
+          card.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            card.classList.toggle("discard-selected");
+            updateDiscardUI();
+          });
+        });
+
+        confirmBtn.addEventListener("click", () => {
+          const ids = Array.from(document.querySelectorAll(".player-hand-card.discard-selected"))
+            .map(c => c.getAttribute("data-instance-id"));
+          if (ids.length !== required) return;
+          postForm("/game/discard-choice", { instanceIds: ids.join(",") });
+        });
+
+        updateDiscardUI();
+      }
+
+      // ---------------------------------------------------
+      // CYBER JAR-STYLE ATTACK/DEFENSE POSITION CHOICE
+      // ---------------------------------------------------
+      const positionPanel = document.getElementById("positionChoicePanel");
+      if (positionPanel) {
+        const chosenPositions = {}; // instanceId -> "attack" | "defense", only entries the player actually clicked
+
+        document.querySelectorAll(".position-choice-toggle").forEach(toggle => {
+          const instanceId = toggle.getAttribute("data-instance-id");
+          toggle.querySelectorAll(".pos-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const pos = btn.getAttribute("data-pos");
+              chosenPositions[instanceId] = pos;
+              toggle.querySelectorAll(".pos-btn").forEach(b => b.classList.remove("active"));
+              btn.classList.add("active");
+            });
+          });
+        });
+
+        document.getElementById("positionChoiceConfirm").addEventListener("click", () => {
+          const overrides = Object.entries(chosenPositions).map(([id, pos]) => id + ":" + pos).join(",");
+          postForm("/game/confirm-positions", { overrides });
+        });
+      }
+
+      // ---------------------------------------------------
+      // RITUAL SUMMON TRIBUTE MATERIAL CHOICE — click eligible cards in
+      // hand or on the field (both carry data-ritual-selectable) to
+      // select them; running total Level must meet the requirement.
+      // ---------------------------------------------------
+      const ritualPanel = document.getElementById("ritualChoicePanel");
+      if (ritualPanel) {
+        const requiredLevel = parseInt(ritualPanel.getAttribute("data-required"), 10);
+        const totalLabel = document.getElementById("ritualChoiceTotal");
+        const ritualConfirmBtn = document.getElementById("ritualChoiceConfirm");
+        const ritualSelectable = document.querySelectorAll('[data-ritual-selectable="true"]');
+
+        function updateRitualUI() {
+          const selected = document.querySelectorAll(".ritual-selected");
+          const total = Array.from(selected).reduce((sum, el) => sum + parseInt(el.getAttribute("data-level") || "0", 10), 0);
+          totalLabel.textContent = total;
+          ritualConfirmBtn.disabled = total < requiredLevel;
+        }
+
+        ritualSelectable.forEach(card => {
+          card.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            card.classList.toggle("ritual-selected");
+            updateRitualUI();
+          });
+        });
+
+        ritualConfirmBtn.addEventListener("click", () => {
+          const ids = Array.from(document.querySelectorAll(".ritual-selected"))
+            .map(c => c.getAttribute("data-instance-id"));
+          postForm("/game/ritual-tribute-choice", { instanceIds: ids.join(",") });
+        });
+
+        updateRitualUI();
+      }
+
+      // ---------------------------------------------------
+      // OWN FIELD MONSTERS: tribute-pick / target-pick / reposition / select-attacker
+      // ---------------------------------------------------
+      // ---------------------------------------------------
+      // SURRENDER: double-click your own Deck to concede (with confirm)
+      // ---------------------------------------------------
+      const deckMeEl = document.getElementById("deckMe");
+      if (deckMeEl) {
+        deckMeEl.title = "Double-click to surrender the Duel";
+        deckMeEl.addEventListener("dblclick", (e) => {
+          e.preventDefault();
+          if (confirm("Surrender this Duel? Your opponent will be declared the winner.")) {
+            postForm("/game/surrender", {});
+          }
+        });
+      }
+
+      // ---------------------------------------------------
+      // ATTACK SWORD AIMING: rotates the selected attacker's sword icon
+      // to visually point at whichever opponent monster is being
+      // hovered/targeted (left/right tilt based on screen position), or
+      // keeps it pointing straight up when there's nothing to aim at —
+      // that's the signal for a direct attack.
+      // ---------------------------------------------------
+      function angleBetweenElements(fromEl, toEl) {
+        const fromRect = fromEl.getBoundingClientRect();
+        const toRect = toEl.getBoundingClientRect();
+        const dx = (toRect.left + toRect.width / 2) - (fromRect.left + fromRect.width / 2);
+        const dy = (toRect.top + toRect.height / 2) - (fromRect.top + fromRect.height / 2);
+        let deg = Math.atan2(dx, -dy) * (180 / Math.PI);
+        return Math.max(-45, Math.min(45, deg));
+      }
+      function getSwordFor(instanceId) {
+        const card = document.querySelector('.own-monster-card[data-instance-id="' + instanceId + '"]');
+        return card ? card.querySelector(".sword-icon-wrap") : null;
+      }
+      function resetSwordAim(instanceId) {
+        const sword = getSwordFor(instanceId);
+        if (sword) { sword.style.transform = ""; sword.classList.remove("sword-aiming"); }
+      }
+
+      const ownMonsterCards = document.querySelectorAll(".own-monster-card");
+
+      // Ignition monster effects (Breaker, Obelisk, Rabid Horseman, ...):
+      // a small badge in the corner, separate from the card's own click.
+      document.querySelectorAll(".effect-badge").forEach(badge => {
+        badge.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const instanceId = badge.getAttribute("data-instance-id");
+          const needsTarget = badge.getAttribute("data-needs-target");
+          startActivation("/game/activate-monster-effect", instanceId, needsTarget || null);
+        });
+      });
+
+      // Union Monster (Y-Dragon Head, Z-Metal Tank, ...): unequip badge
+      // shown on the HOST card — no targeting needed, just a direct post.
+      document.querySelectorAll(".union-badge").forEach(badge => {
+        badge.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const hostInstanceId = badge.getAttribute("data-host-instance-id");
+          postForm("/game/unequip-union", { hostInstanceId: hostInstanceId });
+        });
+      });
+
+      ownMonsterCards.forEach(card => {
+        card.addEventListener("click", (e) => {
+          // A Ritual Summon's Tribute-material choice has a completely
+          // separate click handler that owns clicks on this card
+          // entirely — see the ritualSelectable block above.
+          if (card.getAttribute("data-ritual-selectable") === "true") return;
+
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (pendingSummon) {
+            const zoneIndex = card.getAttribute("data-zone-index");
+            const pos = pendingSummon.selected.indexOf(zoneIndex);
+            if (pos === -1) {
+              if (pendingSummon.selected.length < pendingSummon.requiredTributes) {
+                pendingSummon.selected.push(zoneIndex);
+                card.classList.add("attacker-selected");
+              }
+            } else {
+              pendingSummon.selected.splice(pos, 1);
+              card.classList.remove("attacker-selected");
+            }
+            updateTributePanelText();
+            return;
+          }
+
+          if (pendingActivation && pendingActivation.needsTarget === "monster") {
+            finalizeTarget(card.getAttribute("data-instance-id"));
+            closeTargetPanel();
+            return;
+          }
+
+          const instanceId = card.getAttribute("data-instance-id");
+          const canReposition = card.getAttribute("data-can-reposition") === "true";
+          const canAttack = card.getAttribute("data-can-attack") === "true";
+
+          if (canReposition) {
+            postForm("/game/change-position", { instanceId });
+            return;
+          }
+
+          if (canAttack) {
+            if (selectedAttackerId === instanceId) {
+              resetSwordAim(instanceId);
+              clearAttackerSelection();
+              document.getElementById("targetPanel").style.display = "none";
+            } else {
+              if (selectedAttackerId) resetSwordAim(selectedAttackerId);
+              clearAttackerSelection();
+              selectedAttackerId = instanceId;
+              card.classList.add("attacker-selected");
+              const eligibleTargets = document.querySelectorAll(".opponent-monster-card.attack-target");
+              eligibleTargets.forEach(el => el.classList.add("target-eligible"));
+              const daz = document.getElementById("directAttackZone");
+              if (daz) daz.classList.add("target-eligible-zone");
+
+              // No monsters to aim at at all — the sword just stands
+              // straight up, which is the direct-attack pose.
+              if (eligibleTargets.length === 0) {
+                const sword = getSwordFor(instanceId);
+                if (sword) { sword.style.transform = "rotate(0deg)"; sword.classList.add("sword-aiming"); }
+              }
+
+              const name = card.getAttribute("data-name");
+              const atk = card.getAttribute("data-atk");
+              document.getElementById("targetPanelText").textContent =
+                name + " (ATK " + atk + ") is ready — click a target monster" +
+                (daz ? " or Direct Attack" : "") + ".";
+              openTargetPanel("attack");
+            }
+          }
+        });
+      });
+
+      // ---------------------------------------------------
+      // OPPONENT FIELD MONSTERS: targeting / attack target
+      // ---------------------------------------------------
+      document.querySelectorAll(".opponent-monster-card").forEach(card => {
+        // Hovering a valid attack target while a sword is armed swings
+        // that sword to point at it; leaving it un-hovers back to the
+        // idle "ready" pose.
+        card.addEventListener("mouseenter", () => {
+          if (!selectedAttackerId || !card.classList.contains("target-eligible")) return;
+          const sword = getSwordFor(selectedAttackerId);
+          if (sword) {
+            sword.style.transform = "rotate(" + angleBetweenElements(sword, card) + "deg)";
+            sword.classList.add("sword-aiming");
+          }
+        });
+        card.addEventListener("mouseleave", () => {
+          if (!selectedAttackerId || !card.classList.contains("target-eligible")) return;
+          resetSwordAim(selectedAttackerId);
+        });
+
+        card.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (pendingActivation && pendingActivation.needsTarget === "monster") {
+            finalizeTarget(card.getAttribute("data-instance-id"));
+            closeTargetPanel();
+            return;
+          }
+
+          if (!card.classList.contains("attack-target") || !selectedAttackerId) return;
+
+          const targetInstanceId = card.getAttribute("data-instance-id");
+          const attackerId = selectedAttackerId;
+          const sword = getSwordFor(attackerId);
+          if (sword) sword.style.transform = "rotate(" + angleBetweenElements(sword, card) + "deg)";
+          clearAttackerSelection();
+          document.getElementById("targetPanel").style.display = "none";
+          // Give the swing a beat to actually be seen before the page
+          // navigates to the result of the attack.
+          setTimeout(() => {
+            postForm("/game/attack", { attackerInstanceId: attackerId, targetInstanceId: targetInstanceId });
+          }, 400);
+        });
+      });
+
+      // ---------------------------------------------------
+      // OWN SPELL/TRAP ZONE: targeting / activate (main phase)
+      // ---------------------------------------------------
+      document.querySelectorAll(".own-spelltrap-card").forEach(card => {
+        card.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (pendingActivation && pendingActivation.needsTarget === "spellTrap") {
+            finalizeTarget(card.getAttribute("data-instance-id"));
+            closeTargetPanel();
+            return;
+          }
+
+          const canActivate = card.getAttribute("data-can-activate") === "true";
+          if (!canActivate) return;
+
+          const instanceId = card.getAttribute("data-instance-id");
+          const needsTarget = card.getAttribute("data-needs-target");
+          startActivation("/game/activate-set-card", instanceId, needsTarget || null);
+        });
+      });
+
+      // ---------------------------------------------------
+      // OPPONENT SPELL/TRAP ZONE: targeting only (e.g. Mystical Space Typhoon)
+      // ---------------------------------------------------
+      document.querySelectorAll(".opponent-spelltrap-card").forEach(card => {
+        card.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (pendingActivation && pendingActivation.needsTarget === "spellTrap") {
+            finalizeTarget(card.getAttribute("data-instance-id"));
+            closeTargetPanel();
+          }
+        });
+      });
+
+      // ---------------------------------------------------
+      // RESPONSE MODAL: click an eligible card to activate it
+      // ---------------------------------------------------
+      document.querySelectorAll(".response-option-card").forEach(card => {
+        card.addEventListener("click", (e) => {
+          e.preventDefault();
+          const instanceId = card.getAttribute("data-instance-id");
+          const isHandResponse = card.getAttribute("data-hand-response") === "true";
+
+          if (isHandResponse) {
+            // Kuriboh-style: discards straight from hand, no targeting.
+            startActivation("/game/activate-hand-card", instanceId, null);
+            return;
+          }
+
+          const needsTarget = card.getAttribute("data-needs-target");
+
+          // If this card needs us to click something on the field (a
+          // monster or a Spell/Trap), the modal overlay sits on top of the
+          // whole board and would block that click — hide it until the
+          // target is picked or the player cancels. Two different modals
+          // can host these cards (the battle-response one and the
+          // summon-response one), so hide whichever one this card is
+          // actually inside rather than a hardcoded id.
+          if (needsTarget === "monster" || needsTarget === "spellTrap") {
+            const overlay = card.closest(".response-modal-overlay");
+            if (overlay) overlay.style.display = "none";
+          }
+
+          startActivation("/game/activate-set-card", instanceId, needsTarget || null);
+        });
+      });
+
+      // ---------------------------------------------------
+      // DIRECT ATTACK ZONE
+      // ---------------------------------------------------
+      const directAttackZone = document.getElementById("directAttackZone");
+      if (directAttackZone) {
+        directAttackZone.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!selectedAttackerId) return;
+          const attackerId = selectedAttackerId;
+          const sword = getSwordFor(attackerId);
+          if (sword) { sword.style.transform = "rotate(0deg)"; sword.classList.add("sword-aiming"); }
+          clearAttackerSelection();
+          document.getElementById("targetPanel").style.display = "none";
+          setTimeout(() => {
+            postForm("/game/attack", { attackerInstanceId: attackerId, targetInstanceId: "" });
+          }, 400);
+        });
+      }
+    });
+  </script>
+
+</body>
+</html>

@@ -342,7 +342,10 @@
     if (a.spell) items.push(['Activate', () => startTargeted(uid, 'spell', a.spell.target)]);
     if (a.setSpellTrap) items.push(['Set', () => send('setSpellTrap', { uid })]);
     if (a.activate) items.push(['Activate', () => startTargeted(uid, 'activateSet', a.activate.target)]);
-    if (a.attack) items.push(['Attack', () => startAttack(uid, a.attack)]);
+    if (a.attack) {
+      if (a.attack.targets.length) items.push(['Attack', () => startAttack(uid, a.attack)]);
+      if (a.attack.direct) items.push(['Direct Attack', () => send('attack', { uid, target: null })]);
+    }
     if (a.effect) items.push(['Activate Effect', () => startTargeted(uid, 'monsterEffect', a.effect.target)]);
     if (a.position) items.push([d.faceUp ? 'Change Position' : 'Flip Summon / Position', () => send('position', { uid })]);
     if (a.quick) items.push(['Activate Effect', () => send('quick', { uid })]);

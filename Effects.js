@@ -1168,6 +1168,19 @@ const TRAP_NEGATERS = new Set();
 const HAND_IGNITIONS = {};        // name -> { canActivate(game, gc), activate(game, gc) }
 const PASSIVE_NOTES = {};
 const NO_NORMAL_SUMMON = new Set();
+const PHASE_TRIGGERS = { standby: {}, end: {} };   // name -> (game, gc) for face-up cards, run at the owner's Standby / End Phase
+const BATTLE_DAMAGE_TRIGGERS = {};  // name -> (game, gc, amount, victim): this monster inflicted battle damage
+const BATTLE_DESTROY_TRIGGERS = {}; // name -> (game, gc, destroyed): this monster destroyed `destroyed` by battle
+const DIRECT_WHEN = {};             // name -> (game, gc) => may attack directly right now
+const TRAP_IMMUNE = new Set();      // "Unaffected by Trap effects"
+const STATE_CHECKS = {};            // name -> (game, gc): continuous conditions (destroy when X is missing ...)
+const ATTACK_ALL = new Set();       // may attack each opposing monster once
+const DAMAGE_REDUCERS = {};       // name -> (game, src, player, amount) => new amount (battle damage only)
+const ATTACK_HOOKS = {};          // name -> (game, src, attacker, target) run when an attack is declared
+const ATTACK_RESTRICTIONS = {};    // name -> (game, src, attacker) => true if `attacker` may NOT attack (Gravity Bind)
+const GRAVE_REDIRECTS = {};        // name -> (game, src, card) => true if `card` is banished instead of going to the GY (Banisher of the Light)
+const BATTLE_INDESTRUCTIBLE = new Set();   // "Cannot be destroyed by battle"
+const NO_SPECIAL_SUMMON = new Set();       // "Cannot be Special Summoned"
 const DESTROY_PROTECTION = {};     // name -> (game, gc) => true if this Spell/Trap survives 'destruction' (Seal of Orichalcos)
 const DRAW_PHASE_TRIGGERS = {};    // name -> (game, gc, drawnCard): face-up cards reacting to the Draw Phase draw (Heart of the Underdog)
 const ATTACK_SHIELDS = {};         // name -> (game, src, target) => true if `target` can't be attacked (Seal of Orichalcos)
@@ -1244,7 +1257,22 @@ const Registry = {
     destroyProtection(name, fn) { DESTROY_PROTECTION[normalize(name)] = fn; },
     drawPhaseTrigger(name, fn) { DRAW_PHASE_TRIGGERS[normalize(name)] = fn; },
     attackShield(name, fn) { ATTACK_SHIELDS[normalize(name)] = fn; },
+    battleIndestructible(name) { BATTLE_INDESTRUCTIBLE.add(normalize(name)); },
+    noSpecialSummon(name) { NO_SPECIAL_SUMMON.add(normalize(name)); },
+    attackRestriction(name, fn) { ATTACK_RESTRICTIONS[normalize(name)] = fn; },
+    graveRedirect(name, fn) { GRAVE_REDIRECTS[normalize(name)] = fn; },
+    battleDamageReducer(name, fn) { DAMAGE_REDUCERS[normalize(name)] = fn; },
+    attackHook(name, fn) { ATTACK_HOOKS[normalize(name)] = fn; },
+    endPhaseTrigger(name, fn) { PHASE_TRIGGERS.end[normalize(name)] = fn; },
+    standbyTrigger(name, fn) { PHASE_TRIGGERS.standby[normalize(name)] = fn; },
+    battleDamageTrigger(name, fn) { BATTLE_DAMAGE_TRIGGERS[normalize(name)] = fn; },
+    battleDestroyTrigger(name, fn) { BATTLE_DESTROY_TRIGGERS[normalize(name)] = fn; },
+    directAttackWhen(name, fn) { DIRECT_WHEN[normalize(name)] = fn; },
+    trapImmune(name) { TRAP_IMMUNE.add(normalize(name)); },
+    stateCheck(name, fn) { STATE_CHECKS[normalize(name)] = fn; },
+    attackAll(name) { ATTACK_ALL.add(normalize(name)); },
     noNormalSummon(name) { NO_NORMAL_SUMMON.add(normalize(name)); },
+    unpartial(name) { delete PARTIAL_NOTES[normalize(name)]; },
     partial(name, note) { PARTIAL_NOTES[normalize(name)] = note || "Only part of the card text is implemented"; },
     passive(name, note) { PASSIVE_NOTES[normalize(name)] = note || "Passive effect"; }
 };
@@ -1271,6 +1299,18 @@ function scriptKinds(cardName) {
     if (TRAP_NEGATERS.has(n)) kinds.push("trap-negater");
     if (HAND_IGNITIONS[n]) kinds.push("hand-ignition");
     if (NO_NORMAL_SUMMON.has(n)) kinds.push("special-summon-only");
+    if (PHASE_TRIGGERS.end[n] || PHASE_TRIGGERS.standby[n]) kinds.push("phase-trigger");
+    if (BATTLE_DAMAGE_TRIGGERS[n] || BATTLE_DESTROY_TRIGGERS[n]) kinds.push("battle-trigger");
+    if (DIRECT_WHEN[n]) kinds.push("conditional-direct");
+    if (TRAP_IMMUNE.has(n)) kinds.push("trap-immune");
+    if (STATE_CHECKS[n]) kinds.push("state-check");
+    if (ATTACK_ALL.has(n)) kinds.push("attack-all");
+    if (DAMAGE_REDUCERS[n]) kinds.push("damage-reducer");
+    if (ATTACK_HOOKS[n]) kinds.push("attack-hook");
+    if (ATTACK_RESTRICTIONS[n]) kinds.push("attack-restriction");
+    if (GRAVE_REDIRECTS[n]) kinds.push("grave-redirect");
+    if (BATTLE_INDESTRUCTIBLE.has(n)) kinds.push("battle-indestructible");
+    if (NO_SPECIAL_SUMMON.has(n)) kinds.push("no-special-summon");
     if (DESTROY_PROTECTION[n]) kinds.push("destroy-protection");
     if (DRAW_PHASE_TRIGGERS[n]) kinds.push("draw-trigger");
     if (ATTACK_SHIELDS[n]) kinds.push("attack-shield");
@@ -1294,22 +1334,90 @@ function isUntargetable(cardName) { return UNTARGETABLE.has(normalize(cardName))
 function hasNoSummonResponse(cardName) { return NO_SUMMON_RESPONSE.has(normalize(cardName)); }
 function getDestroyProtection(cardName) { return DESTROY_PROTECTION[normalize(cardName)] || null; }
 function getDrawPhaseTrigger(cardName) { return DRAW_PHASE_TRIGGERS[normalize(cardName)] || null; }
-// Is `target` shielded from being attacked by any face-up card on the field?
-function isAttackShielded(game, target) {
+// Is `target` shielded from being attacked (by `attacker`) by any face-up card on the field?
+function isAttackShielded(game, target, attacker) {
     for (const p of [game.player1, game.player2]) {
-        for (const src of p.getSpellTrapsOnField()) {
-            if (!src.faceUp) continue;
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) continue;
             const fn = ATTACK_SHIELDS[normalize(src.card.name)];
-            if (fn && fn(game, src, target)) return true;
+            if (fn && fn(game, src, target, attacker)) return true;
         }
     }
     return false;
+}
+function isBattleIndestructible(cardName) { return BATTLE_INDESTRUCTIBLE.has(normalize(cardName)); }
+function cannotBeSpecialSummoned(cardName) { return NO_SPECIAL_SUMMON.has(normalize(cardName)); }
+// Is `attacker` stopped from attacking by any face-up card on the field?
+function isAttackRestricted(game, attacker) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) continue;
+            const fn = ATTACK_RESTRICTIONS[normalize(src.card.name)];
+            if (fn && fn(game, src, attacker)) return true;
+        }
+    }
+    return false;
+}
+// Does a face-up card on the field banish `card` instead of letting it go to the Graveyard?
+function sendsToBanishInstead(game, card) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp || src === card || (src.modifiers && src.modifiers.effectsNegated)) continue;
+            const fn = GRAVE_REDIRECTS[normalize(src.card.name)];
+            if (fn && fn(game, src, card)) return true;
+        }
+    }
+    return false;
+}
+function reduceBattleDamage(game, player, amount) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) continue;
+            const fn = DAMAGE_REDUCERS[normalize(src.card.name)];
+            if (fn) amount = fn(game, src, player, amount);
+        }
+    }
+    return amount;
+}
+function runAttackHooks(game, attacker, target) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp) continue;
+            const fn = ATTACK_HOOKS[normalize(src.card.name)];
+            if (fn) fn(game, src, attacker, target);
+        }
+    }
+}
+function cannotBeNormalSummon_unused() {}
+function allFaceUp(game, player) { return [...player.getMonstersOnField(), ...player.getSpellTrapsOnField()].filter(c => c.faceUp && !(c.modifiers && c.modifiers.effectsNegated)); }
+function runPhaseTriggers(game, kind, player) {
+    for (const gc of allFaceUp(game, player)) { const fn = PHASE_TRIGGERS[kind][normalize(gc.card.name)]; if (fn) fn(game, gc); }
+}
+function runBattleDamageTriggers(game, src, amount, victim) {
+    if (!src || src.location !== "monster" || !src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) return;
+    const fn = BATTLE_DAMAGE_TRIGGERS[normalize(src.card.name)];
+    if (fn) fn(game, src, amount, victim);
+}
+function runBattleDestroyTriggers(game, src, destroyed) {
+    if (!src || src.location !== "monster" || !src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) return;
+    const fn = BATTLE_DESTROY_TRIGGERS[normalize(src.card.name)];
+    if (fn) fn(game, src, destroyed);
+}
+function canAttackDirectlyNow(game, gc) {
+    if (gc.faceUp && gc.state && gc.state.directAttackTurn === game.turn) return true;   // Hero Flash!!
+    const fn = DIRECT_WHEN[normalize(gc.card.name)];
+    return !!(fn && gc.faceUp && !(gc.modifiers && gc.modifiers.effectsNegated) && fn(game, gc));
+}
+function isTrapImmune(cardName) { return TRAP_IMMUNE.has(normalize(cardName)); }
+function hasAttackAll(cardName) { return ATTACK_ALL.has(normalize(cardName)); }
+function runStateChecks(game) {
+    for (const p of [game.player1, game.player2]) for (const gc of allFaceUp(game, p)) { const fn = STATE_CHECKS[normalize(gc.card.name)]; if (fn) fn(game, gc); }
 }
 function cannotBeNormalSummoned(cardName) { return NO_NORMAL_SUMMON.has(normalize(cardName)); }
 function partialNote(cardName) { return PARTIAL_NOTES[normalize(cardName)] || null; }
 
 module.exports = {
-    getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
+    runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,

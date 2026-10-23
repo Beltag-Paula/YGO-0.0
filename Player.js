@@ -183,6 +183,13 @@ class Player {
       if (rep && rep(g, card)) return;
     }
     card._noReplace = false;
+    // Remember when and how a card reached the Graveyard (Crystal Pair: "destroyed by battle and sent to the GY").
+    if (g && toZone === "graveyard") { card._gyTurn = g.turn; card._gyByBattle = !!card._destroyedByBattle; }
+    // Banisher of the Light / Dimensional Fissure: cards that would go to the Graveyard are banished instead.
+    if (g && toZone === "graveyard" && !card._noRedirect && require("./Effects").sendsToBanishInstead(g, card)) {
+      g.addLog(`${card.card.name} is banished instead of being sent to the Graveyard.`);
+      toZone = "banished";
+    }
     const before = g ? { id: card.instanceId, name: card.card.name, from: fromZone, fromOwner: g.indexOf(card.owner), fromIndex: card.zoneIndex } : null;
     this._moveCardInner(card, fromZone, toZone);
     if (g && before) {

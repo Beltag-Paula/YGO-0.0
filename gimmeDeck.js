@@ -21,29 +21,37 @@ function parseYDKFile(some_ydk_file) {
 
 const LocalCards = require("./LocalCards.js");
 
-async function loadCard(card_id) {
-  // Local database first (works offline, no rate limits); only fall back
-  // to the ygoprodeck web API for cards the local database doesn't have.
-  const local = LocalCards.get(card_id);
-  if (local) return local;
-  const response = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?id=${card_id}`);
-
-  if (!response.ok) throw new Error(`Card ${card_id} is not in the local database and the card API returned ${response.status}`);
-  const data = await response.json();
-  if (!data.data || !data.data[0]) throw new Error(`Unknown card id ${card_id}`);
-  const raw = data.data[0];
-  const { card_sets, card_prices, ...card } = raw;
-  return card;
+// Cards outside the project's card pool (the DM / early GX era database) are NOT fetched from anywhere:
+// they are reported back so the player can be told exactly which ones are not available.
+async function lookupName(id) {
+  // Best effort only, purely so the message can say WHICH card it is. Never blocks for long, never required.
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 2500);
+    const r = await fetch(`https://db.ygoprodeck.com/api/v7/cardinfo.php?id=${id}`, { signal: ctl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    return j && j.data && j.data[0] ? j.data[0].name : null;
+  } catch (e) { return null; }
 }
 
 async function buildDeckFromParsedYDKFile(some_ydk_file) {
   const parsedFile = parseYDKFile(some_ydk_file);
-
-  const mainDeck = await Promise.all(parsedFile.main.map(loadCard));
-  const extraDeck = await Promise.all(parsedFile.extra.map(loadCard));
-  const sideDeck = await Promise.all(parsedFile.side.map(loadCard));
-
-  return { mainDeck, extraDeck, sideDeck };
+  const unavailable = new Map();
+  const load = (section) => ids => ids.map(id => {
+    const c = LocalCards.getAvailable(id);
+    if (!c) { const u = unavailable.get(id) || { id, copies: 0, section }; u.copies++; unavailable.set(id, u); }
+    return c ? JSON.parse(JSON.stringify(c)) : null;
+  }).filter(Boolean);
+  const mainDeck = load("main")(parsedFile.main);
+  const extraDeck = load("extra")(parsedFile.extra);
+  const sideDeck = load("side")(parsedFile.side);
+  const list = [...unavailable.values()];
+  await Promise.all(list.map(async u => { u.name = await lookupName(u.id); }));
+  for (const u of list) {
+    u.message = `${u.name ? `"${u.name}" (#${u.id})` : `Card #${u.id}`} is not available in the DM / early GX era card database.`;
+  }
+  return { mainDeck, extraDeck, sideDeck, unavailable: list };
 }
 
 async function buildDeckJSON(some_ydk_file){

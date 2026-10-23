@@ -84,11 +84,22 @@ router.post("/decks", upload.single("deck"), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
         const text = req.file.buffer.toString("utf8");
-        const deck = await buildDeckFromParsedYDKFile(text);
-        if (deck.mainDeck.length === 0) return res.status(400).json({ error: "That .ydk has no Main Deck cards." });
+        const { unavailable, ...deck } = await buildDeckFromParsedYDKFile(text);
+        if (deck.mainDeck.length === 0) {
+            return res.status(400).json({
+                error: unavailable.length ? "None of the Main Deck cards are available in the DM / early GX era card database — every card in that .ydk is not available." : "That .ydk has no Main Deck cards.",
+                unavailable
+            });
+        }
         const fallback = (req.file.originalname || "").replace(/\.ydk$/i, "").trim();
         const id = DeckInventory.save(deck, (req.body && req.body.name) || fallback || undefined);
-        res.json({ id, message: "Deck added to your inventory." });
+        const skipped = unavailable.reduce((n, u) => n + u.copies, 0);
+        res.json({
+            id, unavailable,
+            message: skipped
+                ? `Deck added, but ${skipped} card${skipped > 1 ? "s were" : " was"} left out: not available in the DM / early GX era card database.`
+                : "Deck added to your inventory."
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

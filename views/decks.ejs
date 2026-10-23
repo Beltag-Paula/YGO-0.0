@@ -15,6 +15,13 @@
   <div class="row-end"><button class="btn ghost small" id="upCancel">Cancel</button><button class="btn small" id="upGo">Upload</button></div>
 </div></div>
 
+<div class="modal-back" id="noticeModal"><div class="panel modal">
+  <h3 id="ntTitle">Some cards are not available</h3>
+  <p class="sub" id="ntSub" style="margin-bottom:10px"></p>
+  <div class="card-list" id="ntList" style="max-height:260px"></div>
+  <div class="row-end"><button class="btn small" id="ntOk">OK</button></div>
+</div></div>
+
 <div class="modal-back" id="renameModal"><div class="panel modal">
   <h3>Rename deck</h3>
   <div class="field"><input type="text" id="rnName" maxlength="60"></div>
@@ -51,6 +58,12 @@ async function showDetail(id) {
     (d.extra.length ? '<div class="sec">EXTRA DECK</div><div class="card-list">' + rows(d.extra) + '</div>' : '') +
     (d.side.length ? '<div class="sec">SIDE DECK</div><div class="card-list">' + rows(d.side) + '</div>' : '');
 }
+function notice(title, sub, list) {
+  $('ntTitle').textContent = title; $('ntSub').textContent = sub;
+  $('ntList').innerHTML = list.map(u => '<div class="card-row" style="grid-template-columns:1fr auto"><div><div class="n">' + esc(u.name || ('Card #' + u.id)) + '</div><div class="t">#' + u.id + ' · ' + esc(u.message) + '</div></div><span class="x">×' + u.copies + '</span></div>').join('');
+  $('noticeModal').classList.add('on');
+}
+$('ntOk').onclick = () => $('noticeModal').classList.remove('on');
 function rename() { const d = decks.find(x => x.id === sel); $('rnName').value = d ? d.name : ''; $('renameModal').classList.add('on'); }
 $('rnCancel').onclick = () => $('renameModal').classList.remove('on');
 $('rnGo').onclick = async () => {
@@ -67,8 +80,14 @@ $('upGo').onclick = async () => {
   const f = $('upFile').files[0]; if (!f) return toast('Choose a .ydk file first', true);
   const fd = new FormData(); fd.append('name', $('upName').value); fd.append('deck', f);
   $('upGo').disabled = true; $('upGo').textContent = 'Uploading…';
-  try { const r = await api('/api/decks', { method: 'POST', body: fd }); $('uploadModal').classList.remove('on'); sel = r.id; toast(r.message); await load(); showDetail(sel); }
-  catch (e) { toast(e.message, true); } finally { $('upGo').disabled = false; $('upGo').textContent = 'Upload'; }
+  try {
+    const r = await api('/api/decks', { method: 'POST', body: fd }); $('uploadModal').classList.remove('on'); sel = r.id;
+    toast(r.message, !!(r.unavailable && r.unavailable.length)); await load(); showDetail(sel);
+    if (r.unavailable && r.unavailable.length) notice('Deck added — but some cards were left out', r.message, r.unavailable);
+  } catch (e) {
+    toast(e.message, true);
+    if (e.data && e.data.unavailable && e.data.unavailable.length) { $('uploadModal').classList.remove('on'); notice('Upload failed', e.message, e.data.unavailable); }
+  } finally { $('upGo').disabled = false; $('upGo').textContent = 'Upload'; }
 };
 load().then(() => { if (location.hash === '#upload') $('uploadModal').classList.add('on'); });
 </script>

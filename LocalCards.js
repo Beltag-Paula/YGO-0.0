@@ -124,10 +124,22 @@ function toApiShape(r) {
     return card;
 }
 
+// Cards that decks already in the inventory use but the dataset lacks (see tools/build_supplement.js).
+let _supp = null;
+function supplement() {
+    if (_supp) return _supp;
+    const f = path.join(__dirname, "card_database", "supplement.json");
+    _supp = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : {};
+    return _supp;
+}
+/** A card in the DM / early GX era card pool this project supports (the database plus the supplement). */
+function getAvailable(id) { return get(id) || supplement()[String(id)] || null; }
+function isAvailable(id) { return !!getAvailable(id); }
+
 function all() { load(); return _rows; }
 function rowById(id) { load(); return _byId.get(Number(id)) || null; }
 function rowByName(name) { load(); return _byName.get(String(name).trim().toLowerCase()) || null; }
 function get(id) { const r = rowById(id); return r ? toApiShape(r) : null; }
 function typeBits(row) { return row.metadata.type; }
 
-module.exports = { T, all, rowById, rowByName, get, toApiShape, typeBits, typeString };
+module.exports = { T, all, rowById, rowByName, get, getAvailable, isAvailable, toApiShape, typeBits, typeString };

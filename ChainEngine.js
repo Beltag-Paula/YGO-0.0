@@ -76,7 +76,9 @@ module.exports = function install(MainGame) {
             default: list = [];
         }
         // Lord of D. & co.: protected monsters are not legal targets.
-        return list.filter(c => !(c.location === "monster" && (Effects.isProtectedByLordOfD(this, c, gc.owner) || (c.faceUp && Effects.isUntargetable(c.card.name)))));
+        const trapSrc = meta.kind === "trap";
+        return list.filter(c => !(c.location === "monster" && trapSrc && c.faceUp && Effects.isTrapImmune(c.card.name)))
+            .filter(c => !(c.location === "monster" && (Effects.isProtectedByLordOfD(this, c, gc.owner) || (c.faceUp && Effects.isUntargetable(c.card.name)))));
     };
 
     P._anyWindowOpen = function () {
@@ -216,12 +218,13 @@ module.exports = function install(MainGame) {
         let ok = true;
         if (q.canActivate) { try { ok = !!q.canActivate(this, gc, top); } catch (e) { ok = false; } }
         if (!ok) return fail(`${name}'s effect can't be used now.`);
-        if (q.costChoice) {
+        const cc = typeof q.costChoice === "function" ? q.costChoice(this, gc, mode) : q.costChoice;
+        if (cc) {
             let cands = [];
-            try { cands = q.costChoice.candidates(this, gc) || []; } catch (e) { cands = []; }
-            if (cands.length < (q.costChoice.min === undefined ? 1 : q.costChoice.min)) return fail(`${name}: you cannot pay its cost.`);
+            try { cands = cc.candidates(this, gc) || []; } catch (e) { cands = []; }
+            if (cands.length < (cc.min === undefined ? 1 : cc.min)) return fail(`${name}: you cannot pay its cost.`);
         }
-        return { ok: true, meta: { kind: "monster", subtype: "quick" }, speed: 2, targets: null, target: null, fromHand: false, quick: q };
+        return { ok: true, meta: { kind: "monster", subtype: "quick" }, speed: 2, targets: null, target: null, fromHand: false, quick: q, mode };
     };
 
     // ------------------------------------------------------------------
@@ -278,17 +281,18 @@ module.exports = function install(MainGame) {
         // A response to an attack suspends the Battle Response Window until the Chain has resolved.
         if (mode === "battle") { this.state.awaitingResponse = false; this.chainThen = () => this.resolveBattleDamage(); }
         if (q.cost && q.cost.lp) owner.dealDamage(q.cost.lp);
-        const link = { gc, owner, meta: { kind: "monster", subtype: "quick" }, target: null, speed: 2, negated: false, respondsTo: top, quick: true,
+        const link = { gc, owner, meta: { kind: "monster", subtype: "quick" }, target: null, speed: 2, negated: false, respondsTo: top, quick: true, mode, quickDef: q,
             resolveFn: l => q.resolve(this, gc, l) };
+        const ccSpec = typeof q.costChoice === "function" ? q.costChoice(this, gc, mode) : q.costChoice;
         this.addLog(`${owner.name} activates ${gc.card.name}'s Quick Effect!`);
         this.recordFieldEvent("spell-activate", gc, { staysOnField: true });
         const go = () => this.pushChainLink(link);
-        if (q.costChoice) {
-            const cands = q.costChoice.candidates(this, gc) || [];
-            const min = q.costChoice.min === undefined ? 1 : q.costChoice.min;
-            const pay = picked => { q.costChoice.pay(this, gc, picked); go(); };
-            if (cands.length <= min && !q.costChoice.alwaysAsk) pay(cands.slice(0, min));
-            else this.requestChoice(owner, { prompt: q.costChoice.prompt || "Pay the cost", candidates: cands, min, max: min, onChoose: pay });
+        if (ccSpec) {
+            const cands = ccSpec.candidates(this, gc) || [];
+            const min = ccSpec.min === undefined ? 1 : ccSpec.min;
+            const pay = picked => { ccSpec.pay(this, gc, picked); go(); };
+            if (cands.length <= min && !ccSpec.alwaysAsk) pay(cands.slice(0, min));
+            else this.requestChoice(owner, { prompt: ccSpec.prompt || "Pay the cost", candidates: cands, min, max: min, onField: !!ccSpec.onField, onChoose: pay });
         } else go();
         return true;
     };
@@ -328,8 +332,10 @@ module.exports = function install(MainGame) {
      * Set Spellbinding Circle ever got the chance to stop that monster. Returns true if the window opened
      * (the continuation `then` runs once the chain, if any, has finished).
      */
-    P.openPhaseWindow = function (then) {
-        const opp = this.otherPlayer(this.currentPlayer);
+    P.openPhaseWindow = function (then) { return this.openWindowFor(this.otherPlayer(this.currentPlayer), then); };
+
+    /** A priority window for `opp` with an empty chain (phase boundaries, after a battle destroyed monsters ...). */
+    P.openWindowFor = function (opp, then) {
         this.chain = [];
         this.chainWindow = { player: opp };
         if (this.chainAutoPass || this.getChainResponses(opp).length === 0) { this.chainWindow = null; return false; }
@@ -339,6 +345,15 @@ module.exports = function install(MainGame) {
         this.emit("chainWindow", { player: this.indexOf(opp) });
         this.addLog(`${opp.name} may activate a card before the game moves on.`);
         return true;
+    };
+
+    /** After a battle that destroyed monsters, each affected player may respond (Hero Signal, Crystal Pair ...). */
+    P._afterBattleWindows = function () {
+        if (this.gameOver || !this.battleDestroyed.length) return;
+        const involved = new Set(this.battleDestroyed.map(e => e.owner));
+        const order = [this.otherPlayer(this.currentPlayer), this.currentPlayer].filter(p => involved.has(p));
+        const next = i => { if (i >= order.length) return; if (!this.openWindowFor(order[i], () => next(i + 1))) next(i + 1); };
+        next(0);
     };
 
     P.passChain = function () { if (this.state.awaitingChain) this.resolveChain(); };
@@ -364,7 +379,7 @@ module.exports = function install(MainGame) {
         const { gc, meta, target } = link;
         if (link.quick) {
             if (link.negated) this.addLog(`${gc.card.name}'s effect was negated!`);
-            else if (!["monster", "spellTrap", "field"].includes(gc.location) || !gc.faceUp) this.addLog(`${gc.card.name}'s effect fizzles — it is no longer face-up on the field.`);
+            else if (!(link.quickDef && link.quickDef.resolveEvenIfGone) && (!["monster", "spellTrap", "field"].includes(gc.location) || !gc.faceUp)) this.addLog(`${gc.card.name}'s effect fizzles — it is no longer face-up on the field.`);
             else link.resolveFn(link);
             this.checkForWinner();
             return;
@@ -375,7 +390,8 @@ module.exports = function install(MainGame) {
             this.addLog(`${gc.card.name} fizzles — its target is no longer there.`);
         } else {
             this.lastDrawEvent = null; this.lastDiscardEvent = null; this.lastDestroyEvent = null;
-            Effects.activate(this, gc, target);
+            const prevKind = this.resolvingKind; this.resolvingKind = meta.kind;
+            try { Effects.activate(this, gc, target); } finally { this.resolvingKind = prevKind; }
             // The card was destroyed/removed in response, before it could resolve: it stays nowhere on the
             // field, so nothing may remain linked to it (equip bonuses are removed again).
             if (gc.location !== "spellTrap" && gc.location !== "field" && (gc.linkedRevert || gc.linkedTarget || gc.equippedTo)) {
@@ -384,7 +400,7 @@ module.exports = function install(MainGame) {
             }
         }
         // Normal / Quick-Play Spells and Normal / Counter Traps go to the GY once they have resolved.
-        if (["normal", "quickplay", "counter"].includes(meta.subtype) && gc.location === "spellTrap") {
+        if (!meta.staysOnField && ["normal", "quickplay", "counter"].includes(meta.subtype) && gc.location === "spellTrap") {
             gc.owner.moveCard(gc, "spellTrap", "graveyard");
         }
         this.checkForWinner();

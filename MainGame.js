@@ -57,6 +57,11 @@ class MainGame {
             awaitingChoice: false,
             awaitingChain: false
         };
+        this.noAttackTurn = null;       // Threatening Roar: noAttackPlayer cannot declare attacks in this turn
+        this.noAttackPlayer = null;
+        this.battlePhaseEndEffects = [];
+        this.battleDestroyed = [];      // monsters destroyed by the battle that just resolved: [{ gc, owner }]
+        this.turnBattleDestroyed = [];  // ... and every one this turn (cleared at each turn change)
         this.postActions = [];      // fn()s queued by effects to run once the current action has finished (see checkForWinner)
         this.noDamage = null;       // { player, untilTurn } — Crush Card Virus
         this.chain = [];            // open Chain Links (see ChainEngine.js)
@@ -124,6 +129,8 @@ class MainGame {
 
     nextPhase() {
         if (this.gameOver) return;
+        // Effects that last "during the Battle Phase only" (Rainbow Veil) end when it does.
+        if (this.phase !== "battle" && this.battlePhaseEndEffects.length) { const fns = this.battlePhaseEndEffects.splice(0); fns.forEach(f => { try { f(); } catch (e) { /* ignore */ } }); }
         this.emit("phase", { phase: this.phase, player: this.indexOf(this.currentPlayer) });
 
         switch (this.phase) {
@@ -154,6 +161,9 @@ class MainGame {
         // Standard rule: the player going first does not draw on turn 1.
         if (this.firstTurn && this.turn === 1) {
             this.addLog(`${this.currentPlayer.name} skips their first Draw Phase (going first).`);
+        } else if ((this.currentPlayer.skipDrawPhases || 0) > 0) {
+            this.currentPlayer.skipDrawPhases--;
+            this.addLog(`${this.currentPlayer.name} skips this Draw Phase.`);
         } else {
             // Rulebook victory condition: a player who cannot draw when
             // required to loses the Duel immediately.
@@ -174,6 +184,7 @@ class MainGame {
     }
 
     standbyPhase() {
+        Effects.runPhaseTriggers(this, "standby", this.currentPlayer);
         this.addLog(`\n--- STANDBY PHASE (${this.currentPlayer.name}) ---`);
         // No Standby-triggered effects are implemented yet, so this is
         // just a beat to pass through — but it's still its own visible
@@ -763,6 +774,8 @@ class MainGame {
         if (gc.state.hasAttackedThisTurn) return false;
         if (gc.modifiers?.cannotAttack) return false;
         if (this.battleLocked(gc.owner) || this.battlePhaseEnded) return false;
+        if (this.noAttackTurn === this.turn && this.noAttackPlayer === gc.owner) return false;   // Threatening Roar
+        if (Effects.isAttackRestricted(this, gc)) return false;
         const cost = Effects.getAttackCost(gc.card.name);
         if (cost && !cost.canPay(this, gc)) return false;
         return true;
@@ -783,6 +796,11 @@ class MainGame {
     getEligibleResponses(player) {
         return player.getSpellTrapsOnField().filter(gc => (!gc.faceUp || Effects.getQuickEffect(gc.card.name)) && this.checkActivation(gc, "battle").ok);
     }
+    // Face-up monsters with a Quick Effect usable in response to an attack (Crystal Beast Amber Mammoth).
+    getEligibleQuickMonsters(player) {
+        return player.getMonstersOnField().filter(gc => gc.faceUp && Effects.getQuickEffect(gc.card.name) && this.checkActivation(gc, "battle").ok);
+    }
+
     getEligibleSummonResponses(player) {
         return player.getSpellTrapsOnField().filter(gc => !gc.faceUp && this.checkActivation(gc, "summon").ok);
     }
@@ -831,11 +849,15 @@ class MainGame {
             this.addLog(`${attacker.card.name} cannot declare a direct attack.`);
             return false;
         }
-        if (target && Effects.isAttackShielded(this, target)) {
+        if (target && Effects.isAttackShielded(this, target, attacker)) {
             this.addLog(`${target.card.name} cannot be attacked — it is protected.`);
             return false;
         }
-        const directInfo = Effects.getDirectAttacker(attacker.card.name);
+        const directInfo = Effects.getDirectAttacker(attacker.card.name) || (Effects.canAttackDirectlyNow(this, attacker) ? {} : null);
+        if (target && Effects.hasAttackAll(attacker.card.name) && (attacker.state.attackedTargets || []).includes(target.instanceId)) {
+            this.addLog(`${attacker.card.name} has already attacked ${target.card.name} this turn.`);
+            return false;
+        }
         if (!target && defenderMonsters.length > 0 && !directInfo) {
             this.addLog(`${attacker.card.name} cannot attack directly while ${defender.name} controls monsters.`);
             return false;
@@ -843,9 +865,16 @@ class MainGame {
         if (target && (target.owner !== defender || target.location !== "monster")) return false;
 
         attacker.state.hasAttackedThisTurn = true;
+        this.battleDestroyed = [];
+        if (target) { attacker.state.attackedTargets = attacker.state.attackedTargets || []; attacker.state.attackedTargets.push(target.instanceId); }
         const atkCost = Effects.getAttackCost(attacker.card.name);
         if (atkCost) atkCost.pay(this, attacker);
         this.pendingAttack = { attacker, target };
+        Effects.runAttackHooks(this, attacker, target);
+        // Hero Barrier: "negate the next attack this turn" from the opponent.
+        if (this.negateNextAttack && this.negateNextAttack.turn === this.turn && this.negateNextAttack.player === attacker.owner) {
+            this.attackNegated = true; this.addLog("Hero Barrier negates the attack!"); this.negateNextAttack = null;
+        }
         this.emit("attack", {
             attacker: attacker.instanceId, attackerOwner: this.indexOf(attacker.owner),
             target: target ? target.instanceId : null, direct: !target,
@@ -861,7 +890,8 @@ class MainGame {
         this.battleResponse = { defender };
         const eligible = this.getEligibleResponses(defender);
         const handEligible = this.getEligibleHandResponses(defender);
-        if (eligible.length > 0 || handEligible.length > 0) {
+        const quickMons = this.getEligibleQuickMonsters(defender);
+        if (eligible.length > 0 || handEligible.length > 0 || quickMons.length > 0) {
             this.state.awaitingResponse = true;
             this.addLog(`${defender.name} may activate a Set Spell/Trap Card in response.`);
             return true;
@@ -875,7 +905,10 @@ class MainGame {
     resolveBattleDamage() {
         // Exposed so "during the Damage Step only" boosts (Crystal Beast Topaz Tiger) can see it.
         this.currentBattle = this.pendingAttack;
-        try { return this._resolveBattleDamage(); } finally { this.currentBattle = null; }
+        let r;
+        try { r = this._resolveBattleDamage(); } finally { this.currentBattle = null; }
+        this._afterBattleWindows();
+        return r;
     }
 
     _resolveBattleDamage() {
@@ -899,17 +932,20 @@ class MainGame {
             targetWasRevealed: false
         };
 
-        const dealDamage = (player, amount) => {
+        const dealDamage = (player, amount, src) => {
             if (amount <= 0) return 0;
             if (this.preventBattleDamageFor === player) {
                 this.addLog(`${player.name} takes no battle damage this turn.`);
                 return 0;
             }
+            amount = Effects.reduceBattleDamage(this, player, amount);
+            if (amount <= 0) return 0;
             player.dealDamage(amount);
+            if (src) Effects.runBattleDamageTriggers(this, src, amount, player);
             return amount;
         };
 
-        const destroy = (gc) => {
+        const destroy = (gc, by) => {
             // BUGFIX: this used to take a captured "believed owner" — either
             // `defender` or `this.currentPlayer` — from before this Battle
             // Response Window opened. If a Trap activated in that window
@@ -927,9 +963,17 @@ class MainGame {
                 this.addLog(`${gc.card.name} cannot be destroyed by battle this turn.`);
                 return false;
             }
+            if (gc.modifiers && gc.modifiers.battleIndestructible) { this.addLog(`${gc.card.name} cannot be destroyed by battle.`); return false; }
+            if (gc.faceUp && !(gc.modifiers && gc.modifiers.effectsNegated) && Effects.isBattleIndestructible(gc.card.name)) {
+                this.addLog(`${gc.card.name} cannot be destroyed by battle.`);
+                return false;
+            }
             gc._destroyedByBattle = true;
             ownerPlayer.moveCard(gc, "monster", "graveyard");
             event.destroyedNames.push(gc.card.name);
+            this.battleDestroyed.push({ gc, owner: ownerPlayer });
+            this.turnBattleDestroyed.push({ gc, owner: ownerPlayer, turn: this.turn });
+            if (by) Effects.runBattleDestroyTriggers(this, by, gc);
             return true;
         };
 
@@ -950,7 +994,7 @@ class MainGame {
             const directInfo = Effects.getDirectAttacker(attacker.card.name);
             let dmg = this.getAtk(attacker);
             if (directInfo && directInfo.halve && this.opponentPlayer.getMonstersOnField().length > 0) dmg = Math.floor(dmg / 2);
-            const dealt = dealDamage(this.opponentPlayer, dmg);
+            const dealt = dealDamage(this.opponentPlayer, dmg, attacker);
             event.damage = dealt;
             event.damagedPlayerIsPlayer1 = this.opponentPlayer === this.player1;
             this.addLog(`${attacker.card.name} hits directly for ${dealt} damage! (${this.opponentPlayer.name} LP: ${this.opponentPlayer.lifePoints})`);
@@ -963,20 +1007,20 @@ class MainGame {
             if (target.position === "attack") {
                 const defVal = this.getAtk(target);
                 if (atkVal > defVal) {
-                    destroy(target);
-                    const dealt = dealDamage(defender, atkVal - defVal);
+                    destroy(target, attacker);
+                    const dealt = dealDamage(defender, atkVal - defVal, attacker);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = defender === this.player1;
                     this.addLog(`${target.card.name} destroyed! ${defender.name} takes ${dealt} damage.`);
                 } else if (atkVal < defVal) {
-                    destroy(attacker);
-                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
+                    destroy(attacker, target);
+                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal, target);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
                     this.addLog(`${attacker.card.name} destroyed! ${this.currentPlayer.name} takes ${dealt} damage.`);
                 } else {
-                    destroy(target);
-                    destroy(attacker);
+                    destroy(target, attacker);
+                    destroy(attacker, target);
                     this.addLog("Both monsters are destroyed in the collision!");
                 }
             } else {
@@ -988,10 +1032,10 @@ class MainGame {
                 if (wasFaceDown) this.addLog(`The set monster is revealed: ${target.card.name} (DEF ${defVal})!`);
 
                 if (atkVal > defVal) {
-                    destroy(target);
+                    destroy(target, attacker);
                     this.addLog(`${target.card.name} destroyed!`);
                     if (Effects.hasPiercing(attacker.card.name)) {
-                        const pierce = dealDamage(defender, atkVal - defVal);
+                        const pierce = dealDamage(defender, atkVal - defVal, attacker);
                         if (pierce > 0) {
                             event.damage = pierce;
                             event.damagedPlayerIsPlayer1 = defender === this.player1;
@@ -999,7 +1043,7 @@ class MainGame {
                         }
                     }
                 } else if (atkVal < defVal) {
-                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal);
+                    const dealt = dealDamage(this.currentPlayer, defVal - atkVal, target);
                     event.damage = dealt;
                     event.damagedPlayerIsPlayer1 = this.currentPlayer === this.player1;
                     this.addLog(`${this.currentPlayer.name} takes ${dealt} damage from the rebound!`);
@@ -1024,8 +1068,10 @@ class MainGame {
         }
 
         // Hayabusa Knight-style monsters: a second attack each Battle Phase.
-        if (attacker.location === "monster" && Effects.hasSecondAttack(attacker.card.name) && !attacker.state.usedSecondAttack) {
-            attacker.state.usedSecondAttack = true;
+        const moreTargets = Effects.hasAttackAll(attacker.card.name) && attacker.location === "monster" &&
+            this.opponentPlayer.getMonstersOnField().some(t => !(attacker.state.attackedTargets || []).includes(t.instanceId));
+        if (attacker.location === "monster" && (moreTargets || ((Effects.hasSecondAttack(attacker.card.name) || attacker.state.bonusAttack) && !attacker.state.usedSecondAttack))) {
+            if (!moreTargets) attacker.state.usedSecondAttack = true;
             attacker.state.hasAttackedThisTurn = false;
             this.addLog(`${attacker.card.name} may attack a second time this turn!`);
         }
@@ -1112,6 +1158,7 @@ class MainGame {
     }
 
     checkForWinner() {
+        Effects.runStateChecks(this);
         // Effects that must wait until a card has fully left the field (Horn of the Unicorn returning to the Deck ...)
         while (this.postActions.length) { const fn = this.postActions.shift(); try { fn(); } catch (e) { console.error(e); } }
         this.cleanupOrphanedEquips();
@@ -1192,7 +1239,10 @@ class MainGame {
         const used = new Set();
         const chosen = [];
         for (const reqName of materialNames) {
-            const found = pool.find(gc => !used.has(gc.instanceId) && Effects.normalize(gc.card.name) === Effects.normalize(reqName));
+            // a requirement is a card name, a list of acceptable names, or a predicate on the card
+            const ok = gc => typeof reqName === "function" ? !!reqName(gc.card)
+                : (Array.isArray(reqName) ? reqName : [reqName]).some(n => Effects.normalize(gc.card.name) === Effects.normalize(n));
+            const found = pool.find(gc => !used.has(gc.instanceId) && ok(gc));
             if (!found) return null;
             used.add(found.instanceId);
             chosen.push(found);
@@ -1628,6 +1678,7 @@ class MainGame {
     // TURN STRUCTURE
     // ------------------------------------------------------------------
     endPhase() {
+        Effects.runPhaseTriggers(this, "end", this.currentPlayer);
         this.addLog(`\n--- END PHASE (${this.currentPlayer.name}) ---`);
         // Stop here and let the human actually see whose turn just ended
         // before flipping over to the other player. Passing this window
@@ -1735,6 +1786,7 @@ class MainGame {
         this.turn++;
         this.phase = "draw";
         this.battlePhaseEnded = false;
+        this.turnBattleDestroyed = [];
         // A monster can have been Summoned / flipped / moved during the OTHER player's
         // turn; those per-turn flags must not follow it into its owner's next turn.
         this.player1.resetMonsterTurnFlags();

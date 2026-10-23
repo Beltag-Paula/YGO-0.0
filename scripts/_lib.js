@@ -27,6 +27,7 @@ const L = {
     /** Send any card on the field (monster / S/T / field) to its owner's Graveyard. */
     destroy(game, gc) {
         if (!gc || !["monster", "spellTrap", "field"].includes(gc.location)) return false;
+        if (game.resolvingKind === "trap" && gc.location === "monster" && gc.faceUp && Effects.isTrapImmune(gc.card.name)) { game.addLog(`${gc.card.name} is unaffected by Trap effects.`); return false; }
         gc.owner.moveCard(gc, gc.location, "graveyard");
         return true;
     },
@@ -37,12 +38,15 @@ const L = {
     },
     /** Move a card from wherever it is to `zone` (hand / graveyard / banished / deck / extraDeck). */
     send(gc, zone) {
+        if (arguments.length && L._game && L._game.resolvingKind === "trap" && gc.location === "monster" && gc.faceUp && Effects.isTrapImmune(gc.card.name)) return;
         gc.owner.moveCard(gc, gc.location, zone);
     },
 
     /** Special Summon `gc` (from any zone) to `controller`'s Monster Zone. */
     specialSummon(game, gc, controller, opts = {}) {
         if (controller.getFreeMonsterSlot() === -1) return false;
+        if (controller.noSpecialSummonTurn === game.turn) { game.addLog(`${controller.name} cannot Special Summon monsters this turn.`); return false; }
+        if (Effects.cannotBeSpecialSummoned(gc.card.name)) { game.addLog(`${gc.card.name} cannot be Special Summoned.`); return false; }
         if (gc.location === "extraDeck" && game.extraDeckLocked && game.extraDeckLocked(controller)) { game.addLog("You cannot Special Summon monsters from the Extra Deck."); return false; }
         const from = gc.location;
         if (gc.owner !== controller) game.transferCard(gc, gc.owner, from, controller, "monster");
@@ -51,6 +55,7 @@ const L = {
         gc.position = opts.position || "attack";
         gc.state.hasBeenSummonedThisTurn = true;
         gc.state.summonType = "special";
+        gc.state.summonFrom = from;
         game.recordFieldEvent("summon", gc, { special: true });
         const onSummon = Effects.getOnSummon(gc.card.name);
         if (onSummon && onSummon.anySummon) onSummon(game, gc);
@@ -135,6 +140,15 @@ const L = {
     coin() { return Math.random() < 0.5; }
 };
 
+// Meta (kind / subtype) read from the card database, so it can never disagree with the real card.
+const LocalCards = require("../LocalCards");
+L.dbMeta = (name, extra = {}) => {
+    const row = LocalCards.rowByName(name);
+    if (!row) throw new Error(`"${name}" is not in the card database`);
+    const card = LocalCards.toApiShape(row), isTrap = /Trap/.test(card.type);
+    const sub = { Normal: "normal", "Quick-Play": "quickplay", Continuous: "continuous", Equip: "equip", Field: "field", Counter: "counter", Ritual: "normal" }[card.race] || "normal";
+    return { kind: isTrap ? "trap" : "spell", subtype: sub, window: extra.window || (isTrap || sub === "quickplay" ? "anytime" : "main"), ...extra };
+};
 module.exports = L;
 
 // Cards that count as "Harpie Lady" (printed alias text or name-change effects).

@@ -28,6 +28,7 @@ function install(Effects) {
         gc.turnSet = null;
         game.recordFieldEvent("spell-activate", gc, { staysOnField: true, placed: true });
         game.addLog(`${owner.name} places ${gc.card.name} in the Spell & Trap Zone as a Continuous Spell.`);
+        if (L.countCrystalPlaced) L.countCrystalPlaced(game);      // Crystal Tree
         return true;
     }
     L.placeCB = place;

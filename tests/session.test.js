@@ -42,6 +42,18 @@ test("Offline deck building uses the local card DB", async () => {
     assert.equal(deck.mainDeck[0].name, "Seismic Crasher");
     assert.match(deck.mainDeck[0].card_images[0].image_url_small, /114932/);
 });
+test("Cards outside the DM / early GX era pool are reported by name instead of being fetched from anywhere", async () => {
+    const { buildDeckFromParsedYDKFile } = require("../gimmeDeck");
+    const d = await buildDeckFromParsedYDKFile("#main\n114932\n99999999\n99999999\n#extra\n!side\n");
+    assert.equal(d.mainDeck.length, 1, "only the available card is kept");
+    assert.equal(d.unavailable.length, 1); assert.equal(d.unavailable[0].copies, 2); assert.equal(d.unavailable[0].id, 99999999);
+    assert.match(d.unavailable[0].message, /is not available in the DM \/ early GX era card database/);
+});
+test("Cards the dataset lacks but your existing decks use (Blue-Eyes, Dark Magician) stay available", async () => {
+    const LC = require("../LocalCards");
+    assert.ok(LC.isAvailable(89631139) && LC.isAvailable(46986414));
+    assert.ok(!LC.isAvailable(99999999));
+});
 test("Script coverage is reported per deck", () => {
     const d = DeckInventory.readDeck("kaiba");
     const cov = CardScripts.deckCoverage([...d.mainDeck, ...d.extraDeck]);
@@ -150,6 +162,11 @@ test("HTTP API: deck list, duel start, state and an action", async () => {
         assert.equal(st.view.you.hand.length, 5);
         const act = await (await j("/api/duel/act", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ type: "endTurn" }) })).json();
         assert.ok(act.view && Array.isArray(act.events));
+        // a .ydk made only of unavailable cards is refused with a clear message
+        const fd = new FormData(); fd.append("deck", new Blob(["#main\n99999999\n"]), "x.ydk");
+        const up = await fetch(base + "/api/decks", { method: "POST", body: fd });
+        assert.equal(up.status, 400); const upj = await up.json();
+        assert.match(upj.error, /not available/); assert.equal(upj.unavailable[0].id, 99999999);
         const bad = await j("/api/duel/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ playerDeck: "zzz", botDeck: "yugi" }) });
         assert.equal(bad.status, 400);
         for (const page of ["/", "/decks", "/duel", "/duel/play"]) assert.equal((await j(page)).status, 200, page);

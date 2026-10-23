@@ -473,8 +473,8 @@ class DuelSession {
             }
             if (battle && g.canAttack(gc)) {
                 const foes = g.opponentPlayer.getMonstersOnField();
-                const direct = foes.length === 0 && !Effects.cannotAttackDirectly(gc.card.name);
-                act.attack = { targets: foes.map(c => this.uidOf(c)), direct };
+                const direct = (foes.length === 0 && !Effects.cannotAttackDirectly(gc.card.name)) || !!Effects.getDirectAttacker(gc.card.name) || Effects.canAttackDirectlyNow(g, gc);
+                act.attack = { targets: foes.filter(c => !Effects.isAttackShielded(g, c, gc)).map(c => this.uidOf(c)), direct };
             }
         } else if (where === "spellTrap" || where === "field") {
             if (gc.owner !== h) return act;
@@ -522,7 +522,7 @@ class DuelSession {
         }
         if (s.awaitingResponse) {
             const pa = g.pendingAttack;
-            const opts = g.getEligibleResponses(h).map(c => optFor(c, "battle"));
+            const opts = [...g.getEligibleResponses(h), ...g.getEligibleQuickMonsters(h)].map(c => optFor(c, "battle"));
             return {
                 type: "battleResponse",
                 attacker: pa ? this.uidOf(pa.attacker) : null, target: pa && pa.target ? this.uidOf(pa.target) : null,

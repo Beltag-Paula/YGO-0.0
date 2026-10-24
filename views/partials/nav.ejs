@@ -4,7 +4,8 @@
   <nav class="nav">
     <a href="/" class="<%= page==='home'?'on':'' %>">Home</a>
     <a href="/duel" class="<%= page==='duel'?'on':'' %>">Solo Duel</a>
-    <a href="/decks" class="<%= page==='decks'?'on':'' %>">Deck Inventory</a>
+    <a href="/decks" class="<%= page==='decks'?'on':'' %>">Decks</a>
+    <a href="/builder" class="<%= page==='builder'?'on':'' %>">Deck Builder</a>
   </nav>
 </div>
 <div class="toast-host" id="toasts"></div>
@@ -22,9 +23,11 @@
     const cov = d.script ? d.script.pct : null;
     const cls = cov == null ? '' : cov >= 85 ? 'ok' : cov >= 50 ? 'mid' : 'low';
     return '<div class="art" style="background-image:url(' + esc(d.cover ? d.cover.image : '') + ')"></div>' +
+      (d.portrait ? '<div class="portrait" style="background-image:url(' + esc(d.portrait) + ')"></div><div class="owner-tag">' + esc(d.ownerName) + '</div>' : '') +
       '<div class="badge-row"><span class="chip">' + d.counts.main + ' CARDS</span>' +
       (cov == null ? '' : '<span class="chip ' + cls + '" title="Share of this deck\'s cards whose effects are scripted">FX ' + cov + '%</span>') + '</div>' +
       '<div class="meta"><b>' + esc(d.name) + '</b><small>' + d.counts.monsters + ' Monsters · ' + d.counts.spells + ' Spells · ' + d.counts.traps + ' Traps' +
       (d.counts.extra ? ' · ' + d.counts.extra + ' Extra' : '') + '</small></div>';
   };
+  window.caseClass = d => 'deck-case' + (d && d.portrait ? ' has-owner' : '');
 </script>

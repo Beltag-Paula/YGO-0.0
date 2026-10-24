@@ -20,6 +20,34 @@ const path = require("path");
 const DIR = path.join(__dirname, "deck_inventory");
 
 const KNOWN_NAMES = { yugi: "Yugi's Deck", kaiba: "Kaiba's Deck" };
+
+/**
+ * Duelists. `portrait` lives in views/images (served at /images). A deck gets an owner either from an
+ * explicit `owner` field in its json, from its file id (yugi.json ...), or - for decks that were
+ * uploaded without a name - from signature cards. Custom decks can pick any owner in the builder.
+ */
+const OWNERS = {
+    yugi:  { name: "Yugi",  portrait: "/images/YamiYugi-MDDG.png", sig: [/^Dark Magician$/, /^Gaia The Fierce Knight$/, /^Summoned Skull$/] },
+    kaiba: { name: "Kaiba", portrait: "/images/Kaiba-MDDG.png",    sig: [/^Blue-Eyes White Dragon$/, /^Obelisk the Tormentor$/, /^Heart of the Underdog$/] },
+    joey:  { name: "Joey",  portrait: "/images/Joey-MDDG.png",     sig: [/^Gilford the Lightning$/, /^Masaki the Legendary Swordsman$/, /^Flame Manipulator$/] },
+    mai:   { name: "Mai",   portrait: "/images/Mai-MDDG.png",      sig: [/^Harpie Lady/, /^Harpie's Pet Dragon$/, /^Harpie Queen$/] },
+    jesse: { name: "Jesse", portrait: "/images/Jesse-MDDG.png",    sig: [/^Rainbow Dragon$/, /^Rose Papillon$/, /^Crystal Beast /] },
+    jaden: { name: "Jaden", portrait: "/images/Jaden-MDDG.png",    sig: [/^Elemental HERO /, /^Polymerization$/] }
+};
+const OWNER_IDS = Object.keys(OWNERS);
+
+/** Which duelist does this deck belong to? Returns an OWNERS key or null. */
+function ownerOf(id, deck) {
+    if (deck && OWNERS[deck.owner]) return deck.owner;
+    if (OWNERS[id]) return id;
+    const names = (deck.mainDeck || []).concat(deck.extraDeck || []).map(c => c.name);
+    let best = null, bestN = 0;
+    for (const [k, o] of Object.entries(OWNERS)) {
+        const n = names.filter(nm => o.sig.some(re => re.test(nm))).length;
+        if (n > bestN) { best = k; bestN = n; }
+    }
+    return bestN >= 4 ? best : null;
+}
 const GENERIC_WORDS = new Set([
     "the", "of", "and", "dragon", "dragons", "warrior", "knight", "monster", "card", "dark", "light",
     "magician", "beast", "with", "from", "swordsman", "lady", "girl", "king", "queen"
@@ -95,8 +123,14 @@ function summarize(id, deck, extra = {}) {
     main.forEach(c => { counts[c.name] = (counts[c.name] || 0) + 1; });
     const over = Object.entries(counts).filter(([, n]) => n > 3).map(([k]) => k);
     if (over.length) warnings.push(`More than 3 copies of: ${over.join(", ")}`);
+    const owner = ownerOf(id, deck);
     return {
         id,
+        owner,
+        ownerName: owner ? OWNERS[owner].name : null,
+        portrait: owner ? OWNERS[owner].portrait : null,
+        builtin: !!OWNERS[id],
+        custom: !!deck.custom,
         name: deck.name || deriveName(id, deck),
         customName: !!deck.name,
         createdAt: deck.createdAt || null,
@@ -141,20 +175,42 @@ function list(decorate) {
     }
     // Built-in duelists first, then newest uploads first.
     return out.sort((a, b) => {
-        const ab = KNOWN_NAMES[a.id] ? 0 : 1, bb = KNOWN_NAMES[b.id] ? 0 : 1;
+        const ab = OWNERS[a.id] ? 0 : 1, bb = OWNERS[b.id] ? 0 : 1;
         return ab - bb || (b.mtime || 0) - (a.mtime || 0);
     });
 }
 
 function save(deckJson, name) {
     ensureDir();
-    const deck = { ...deckJson };
+    const deck = cleanDeck(deckJson);
     if (name) deck.name = String(name).trim().slice(0, 60);
     deck.createdAt = deck.createdAt || new Date().toISOString();
     let id = `deck_${Date.now()}`;
     while (fs.existsSync(fileFor(id))) id += "x";
     fs.writeFileSync(fileFor(id), JSON.stringify(deck, null, 2), "utf8");
     return id;
+}
+
+/** Normalise what the builder / uploader hands us into a stored deck. */
+function cleanDeck(d) {
+    const keep = c => (c && typeof c === "object") ? c : null;
+    const arr = a => (Array.isArray(a) ? a.map(keep).filter(Boolean) : []);
+    const out = { mainDeck: arr(d.mainDeck), extraDeck: arr(d.extraDeck), sideDeck: arr(d.sideDeck) };
+    if (d.name) out.name = String(d.name).trim().slice(0, 60);
+    if (OWNERS[d.owner]) out.owner = d.owner;
+    if (d.custom) out.custom = true;
+    if (d.createdAt) out.createdAt = d.createdAt;
+    return out;
+}
+
+/** Overwrite an existing deck (builder "Save"). Keeps createdAt, stamps updatedAt. */
+function update(id, deckJson) {
+    const old = readDeck(id);
+    if (!old) return false;
+    const deck = cleanDeck({ ...old, ...deckJson, createdAt: old.createdAt });
+    deck.updatedAt = new Date().toISOString();
+    fs.writeFileSync(fileFor(id), JSON.stringify(deck, null, 2), "utf8");
+    return true;
 }
 
 function rename(id, name) {
@@ -172,4 +228,4 @@ function remove(id) {
     return true;
 }
 
-module.exports = { DIR, list, readDeck, save, rename, remove, summarize, deriveName, safeId };
+module.exports = { DIR, OWNERS, OWNER_IDS, ownerOf, list, readDeck, save, update, rename, remove, summarize, deriveName, safeId };

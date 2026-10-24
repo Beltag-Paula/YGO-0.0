@@ -2,7 +2,7 @@
 <body><div class="page">
 <%- include('partials/nav', { page }) %>
 <h1 class="title">Deck Inventory</h1>
-<p class="sub">Every deck in <code>deck_inventory/</code>. “FX” is the share of the deck's cards whose effects are scripted in the engine.</p>
+<p class="sub">Every deck in <code>deck_inventory/</code>. Build your own in the <a href="/builder" style="color:var(--gold-hi)">Deck Builder</a>. “FX” is the share of the deck's cards whose effects are scripted in the engine.</p>
 <div class="deck-layout">
   <div class="deck-grid" id="grid"></div>
   <div class="panel panel-pad detail" id="detail"><p class="sub">Select a deck to see its cards.</p></div>
@@ -35,11 +35,13 @@ async function load() {
   decks = (await api('/api/decks')).decks;
   const g = $('grid'); g.innerHTML = '';
   decks.forEach(d => {
-    const el = document.createElement('div'); el.className = 'deck-case' + (sel === d.id ? ' sel' : '');
+    const el = document.createElement('div'); el.className = caseClass(d) + (sel === d.id ? ' sel' : '');
     el.innerHTML = deckCaseHTML(d); el.onclick = () => { sel = d.id; load(); showDetail(d.id); }; g.appendChild(el);
   });
   const add = document.createElement('div'); add.className = 'deck-case add'; add.id = 'upload';
-  add.innerHTML = '<div><div class="plus">+</div><b style="letter-spacing:.12em">UPLOAD DECK</b></div>'; add.onclick = () => $('uploadModal').classList.add('on'); g.appendChild(add);
+  add.innerHTML = '<div><div class="plus">+</div><b>UPLOAD .YDK</b></div>'; add.onclick = () => $('uploadModal').classList.add('on'); g.appendChild(add);
+  const nw = document.createElement('a'); nw.className = 'deck-case add'; nw.href = '/builder?new=1';
+  nw.innerHTML = '<div><div class="plus">✦</div><b>BUILD NEW DECK</b></div>'; g.appendChild(nw);
   if (!sel && decks[0]) { sel = decks[0].id; load(); showDetail(sel); }
 }
 async function showDetail(id) {
@@ -49,11 +51,11 @@ async function showDetail(id) {
     '<span class="s ' + c.script.status + '" title="' + esc(c.script.note || c.script.kinds.join(', ') || '') + '">' + ({vanilla:'VANILLA',scripted:'SCRIPTED',partial:'PARTIAL',stub:'NO SCRIPT'})[c.script.status] + '</span><span class="x">×' + c.copies + '</span></div>').join('');
   const cov = sum.script;
   $('detail').innerHTML =
-    '<h2>' + esc(d.name) + '</h2><div class="sub" style="margin:0">' + d.counts.main + ' main · ' + d.counts.extra + ' extra · ' + d.counts.side + ' side</div>' +
+    '<div class="who">' + (sum.portrait ? '<img src="' + esc(sum.portrait) + '" alt="">' : '') + '<div><h2>' + esc(d.name) + '</h2>' + (sum.ownerName ? '<div class="sub" style="margin:0;color:var(--gold)">DECK OF ' + esc(sum.ownerName.toUpperCase()) + '</div>' : '') + '</div></div><div class="sub" style="margin:0">' + d.counts.main + ' main · ' + d.counts.extra + ' extra · ' + d.counts.side + ' side</div>' +
     '<div class="stats">' + (cov ? '<span class="chip ' + (cov.pct >= 85 ? 'ok' : cov.pct >= 50 ? 'mid' : 'low') + '">' + cov.pct + '% SCRIPTED (' + (cov.vanilla + cov.scripted + cov.partial) + '/' + cov.total + ')</span>' : '') +
     (d.warnings || []).map(w => '<span class="chip low">' + esc(w) + '</span>').join('') + '</div>' +
     '<div class="row-end" style="justify-content:flex-start;margin:0 0 6px"><a class="btn small" href="/duel?deck=' + encodeURIComponent(id) + '">Duel with this</a>' +
-    '<button class="btn ghost small" onclick="rename()">Rename</button><button class="btn danger small" onclick="del()">Delete</button></div>' +
+    '<a class="btn ghost small" href="/builder?deck=' + encodeURIComponent(id) + '">' + (sum.builtin ? 'Edit a copy' : 'Edit cards') + '</a><button class="btn ghost small" onclick="rename()">Rename</button><button class="btn danger small" onclick="del()">Delete</button></div>' +
     '<div class="sec">MAIN DECK</div><div class="card-list">' + rows(d.main) + '</div>' +
     (d.extra.length ? '<div class="sec">EXTRA DECK</div><div class="card-list">' + rows(d.extra) + '</div>' : '') +
     (d.side.length ? '<div class="sec">SIDE DECK</div><div class="card-list">' + rows(d.side) + '</div>' : '');

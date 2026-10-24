@@ -18,6 +18,7 @@ app.use(express.json());
 // ---- pages ---------------------------------------------------------------
 app.get("/", (req, res) => res.render("menu", { page: "home" }));
 app.get("/decks", (req, res) => res.render("decks", { page: "decks" }));
+app.get("/builder", (req, res) => res.render("builder", { page: "builder" }));
 app.get("/upload", (req, res) => res.redirect("/decks"));
 app.get("/duel", (req, res) => res.render("duel-setup", { page: "duel" }));
 app.get("/duel/play", (req, res) => res.render("duel", { page: "play" }));

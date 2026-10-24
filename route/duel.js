@@ -20,6 +20,7 @@ const DeckInventory = require("../DeckInventory");
 const DuelSession = require("../DuelSession");
 const CardScripts = require("../CardScripts");
 const { buildDeckFromParsedYDKFile } = require("../gimmeDeck");
+const DeckBuilder = require("../DeckBuilder");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
@@ -104,6 +105,32 @@ router.post("/decks", upload.single("deck"), async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ---- deck builder: card pool + create / edit deck from card ids -----------------------------
+router.get("/cards", (req, res) => res.json(DeckBuilder.search(req.query)));
+router.get("/cards/meta", (req, res) => res.json({ ...DeckBuilder.meta(), owners: Object.entries(DeckInventory.OWNERS).map(([id, o]) => ({ id, name: o.name, portrait: o.portrait })) }));
+
+router.get("/decks/:id/ids", (req, res) => {
+    const deck = DeckInventory.readDeck(req.params.id);
+    if (!deck) return res.status(404).json({ error: "Deck not found" });
+    const s = DeckInventory.summarize(req.params.id, deck);
+    res.json({ id: s.id, name: s.name, owner: s.owner, builtin: s.builtin, ...DeckBuilder.toIds(deck) });
+});
+
+function builderSave(req, res, id) {
+    try {
+        const b = req.body || {};
+        const { deck, warnings } = DeckBuilder.assemble(b);
+        const meta = { name: String(b.name || "").trim() || "New Deck", owner: b.owner, custom: true };
+        if (id) {
+            if (!DeckInventory.update(id, { ...deck, ...meta })) return res.status(404).json({ error: "Deck not found" });
+            return res.json({ id, warnings, message: "Deck saved." });
+        }
+        res.json({ id: DeckInventory.save({ ...deck, ...meta }, meta.name), warnings, message: "Deck created." });
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+}
+router.post("/decks/custom", (req, res) => builderSave(req, res, null));
+router.put("/decks/:id", (req, res) => builderSave(req, res, req.params.id));
 
 router.patch("/decks/:id", (req, res) => {
     if (!DeckInventory.rename(req.params.id, req.body && req.body.name)) return res.status(404).json({ error: "Deck not found" });

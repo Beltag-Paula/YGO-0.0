@@ -24,7 +24,6 @@ require("./CardScripts").loadAll();
 const DeckInventory = require("./DeckInventory");
 
 const PHASE_ORDER = ["draw", "standby", "m1", "battle", "m2", "end"];
-const AVATARS = { yugi: "/images/YamiYugi-MDDG.png", kaiba: "/images/Kaiba-MDDG.png" };
 
 class DuelSession {
     /**
@@ -44,10 +43,10 @@ class DuelSession {
         const bs = DeckInventory.summarize(o.botDeckId, botDeck);
 
         this.human = new Player((o.playerName || "You").slice(0, 24), humanDeck);
-        this.human.profile = { avatar: AVATARS[o.playerDeckId] || null, deckName: hs.name, deckId: o.playerDeckId };
-        const botName = o.botDeckId === "kaiba" ? "Kaiba" : o.botDeckId === "yugi" ? "Yugi" : "Duel Bot";
+        this.human.profile = { avatar: hs.portrait || null, deckName: hs.name, deckId: o.playerDeckId };
+        const botName = bs.ownerName || "Duel Bot";
         this.bot = new Player(botName, botDeck);
-        this.bot.profile = { avatar: AVATARS[o.botDeckId] || null, deckName: bs.name, deckId: o.botDeckId };
+        this.bot.profile = { avatar: bs.portrait || null, deckName: bs.name, deckId: o.botDeckId };
 
         const first = o.first === "you" || o.first === "bot" ? o.first : (Math.random() < 0.5 ? "you" : "bot");
         this.first = first;

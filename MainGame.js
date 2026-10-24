@@ -476,6 +476,7 @@ class MainGame {
     getRequiredTributesForSummon(player, gc) {
         const level = this.getEffectiveLevel(player, gc);
         let raw = Effects.getTributeOverride ? Effects.getTributeOverride(gc.card.name, this.getRequiredTributes(level)) : this.getRequiredTributes(level);
+        if (raw > 0 && Effects.tributeFreeSource(this, player, gc)) raw = 0;
         const forced = raw > 0 ? this.getSoulExchangeTarget(player) : null;
         return { required: raw - (forced ? 1 : 0), creditsUsed: 0, forced, total: raw };
     }
@@ -531,7 +532,8 @@ class MainGame {
         const isBonusSummon = false;
         if (!free && this.state.actedThisWindow && mode === "free") return false;
 
-        const { required, creditsUsed, forced } = this.getRequiredTributesForSummon(p, gc);
+        const { required, creditsUsed, forced, total } = this.getRequiredTributesForSummon(p, gc);
+        if (total === 0 && Effects.getTributeOverride && this.getRequiredTributes(this.getEffectiveLevel(p, gc)) > 0) { const src = Effects.tributeFreeSource(this, p, gc); if (src) { src.state.tributeFreeUsed = true; this.addLog(`${src.card.name} lets ${gc.card.name} be Normal Summoned without Tributes.`); } }
         // Some monsters (Gilford the Lightning, The Tripper Mercury) can
         // ALSO be Tribute Summoned with a different number of Tributes.
         const alts = Effects.altTributeCounts(gc.card.name).map(n => n - (forced ? 1 : 0));

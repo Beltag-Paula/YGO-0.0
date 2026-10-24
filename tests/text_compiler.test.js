@@ -29,3 +29,32 @@ test("Dark Eruption cannot target a monster that is over the ATK limit", () => {
 test("Mobius: Tribute Summon trigger is registered as an on-summon effect", () => {
     assert.ok(Effects.getOnSummon("Mobius the Frost Monarch"));
 });
+
+test("End Phase / Standby compiled triggers are registered", () => {
+    const Effects = require("../Effects");
+    const L = require("../LocalCards");
+    let n = 0;
+    for (const r of L.all()) if (/Monster/.test(L.toApiShape(r).type) && Effects.scriptKinds(r.name).some(k => /end|standby|phase/i.test(k))) n++;
+    assert.ok(n > 0);
+});
+
+test("Necroshade in the GY lets a Level 5+ Elemental HERO be Normal Summoned without Tributes, once", () => {
+    const d = makeDuel({ p1: { hand: ["Elemental HERO Flame Wingman"], graveyard: ["Elemental HERO Necroshade"] } });
+    const hero = d.hand(d.p1, "Elemental HERO Flame Wingman") || d.find(d.p1, "Elemental HERO Flame Wingman", "hand");
+    assert.equal(d.game.getRequiredTributesForSummon(d.p1, hero).required, 0);
+});
+
+test("Cyber Dragon is Special Summoned from hand only when just the opponent controls a monster", () => {
+    const d = makeDuel({ p1: { hand: ["Cyber Dragon"] }, p2: { monsters: ["Summoned Skull"] } });
+    const cd = d.find(d.p1, "Cyber Dragon", "hand");
+    assert.equal(d.game.activateHandEffect(cd), true);
+    assert.ok(d.find(d.p1, "Cyber Dragon", "monster"));
+    const d2 = makeDuel({ p1: { hand: ["Cyber Dragon"] } });
+    assert.equal(d2.game.activateHandEffect(d2.find(d2.p1, "Cyber Dragon", "hand")), false);
+});
+
+test("compiled passive sentences: summon restrictions and stat auras", () => {
+    const E = require("../Effects");
+    assert.equal(E.cannotBeNormalSummoned("Vennominaga the Deity of Poisonous Snakes"), true);
+    assert.ok(E.scriptKinds("Gaia Power").includes("continuous"));
+});

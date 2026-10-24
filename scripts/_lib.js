@@ -144,8 +144,9 @@ const L = {
 const LocalCards = require("../LocalCards");
 L.dbMeta = (name, extra = {}) => {
     const row = LocalCards.rowByName(name);
-    if (!row) throw new Error(`"${name}" is not in the card database`);
-    const card = LocalCards.toApiShape(row), isTrap = /Trap/.test(card.type);
+    const sup = row ? null : LocalCards.supplementByName(name);
+    if (!row && !sup) throw new Error(`"${name}" is not in the card database`);
+    const card = row ? LocalCards.toApiShape(row) : sup, isTrap = /Trap/.test(card.type);
     const sub = { Normal: "normal", "Quick-Play": "quickplay", Continuous: "continuous", Equip: "equip", Field: "field", Counter: "counter", Ritual: "normal" }[card.race] || "normal";
     return { kind: isTrap ? "trap" : "spell", subtype: sub, window: extra.window || (isTrap || sub === "quickplay" ? "anytime" : "main"), ...extra };
 };

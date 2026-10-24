@@ -1168,6 +1168,7 @@ const TRAP_NEGATERS = new Set();
 const HAND_IGNITIONS = {};        // name -> { canActivate(game, gc), activate(game, gc) }
 const PASSIVE_NOTES = {};
 const NO_NORMAL_SUMMON = new Set();
+const TRIBUTE_FREE = {};            // name of a card in the GY -> (game, src, player, summonedCard) => true when it lets that Normal Summon skip its Tributes (Elemental HERO Necroshade)
 const PHASE_TRIGGERS = { standby: {}, end: {} };   // name -> (game, gc) for face-up cards, run at the owner's Standby / End Phase
 const BATTLE_DAMAGE_TRIGGERS = {};  // name -> (game, gc, amount, victim): this monster inflicted battle damage
 const BATTLE_DESTROY_TRIGGERS = {}; // name -> (game, gc, destroyed): this monster destroyed `destroyed` by battle
@@ -1272,6 +1273,7 @@ const Registry = {
     stateCheck(name, fn) { STATE_CHECKS[normalize(name)] = fn; },
     attackAll(name) { ATTACK_ALL.add(normalize(name)); },
     noNormalSummon(name) { NO_NORMAL_SUMMON.add(normalize(name)); },
+    tributeFree(name, fn) { TRIBUTE_FREE[normalize(name)] = fn; },
     unpartial(name) { delete PARTIAL_NOTES[normalize(name)]; },
     partial(name, note) { PARTIAL_NOTES[normalize(name)] = note || "Only part of the card text is implemented"; },
     passive(name, note) { PASSIVE_NOTES[normalize(name)] = note || "Passive effect"; }
@@ -1299,6 +1301,7 @@ function scriptKinds(cardName) {
     if (TRAP_NEGATERS.has(n)) kinds.push("trap-negater");
     if (HAND_IGNITIONS[n]) kinds.push("hand-ignition");
     if (NO_NORMAL_SUMMON.has(n)) kinds.push("special-summon-only");
+    if (TRIBUTE_FREE[n]) kinds.push("tribute-free");
     if (PHASE_TRIGGERS.end[n] || PHASE_TRIGGERS.standby[n]) kinds.push("phase-trigger");
     if (BATTLE_DAMAGE_TRIGGERS[n] || BATTLE_DESTROY_TRIGGERS[n]) kinds.push("battle-trigger");
     if (DIRECT_WHEN[n]) kinds.push("conditional-direct");
@@ -1413,11 +1416,15 @@ function hasAttackAll(cardName) { return ATTACK_ALL.has(normalize(cardName)); }
 function runStateChecks(game) {
     for (const p of [game.player1, game.player2]) for (const gc of allFaceUp(game, p)) { const fn = STATE_CHECKS[normalize(gc.card.name)]; if (fn) fn(game, gc); }
 }
+/** A card in `player`'s Graveyard that lets `gc` be Normal Summoned without Tributes right now (or null). */
+function tributeFreeSource(game, player, gc) {
+    return player.zone.graveyard.find(src => { const fn = TRIBUTE_FREE[normalize(src.card.name)]; return fn && fn(game, src, player, gc); }) || null;
+}
 function cannotBeNormalSummoned(cardName) { return NO_NORMAL_SUMMON.has(normalize(cardName)); }
 function partialNote(cardName) { return PARTIAL_NOTES[normalize(cardName)] || null; }
 
 module.exports = {
-    runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
+    tributeFreeSource, runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,

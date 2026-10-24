@@ -133,6 +133,8 @@ function supplement() {
     return _supp;
 }
 /** A card in the DM / early GX era card pool this project supports (the database plus the supplement). */
+/** A supplement card (post-DB card an inventory deck uses) by exact name, or null. */
+function supplementByName(name) { const n = String(name).toLowerCase(); return Object.values(supplement()).find(c => c.name.toLowerCase() === n) || null; }
 function getAvailable(id) { return get(id) || supplement()[String(id)] || null; }
 function isAvailable(id) { return !!getAvailable(id); }
 
@@ -142,4 +144,5 @@ function rowByName(name) { load(); return _byName.get(String(name).trim().toLowe
 function get(id) { const r = rowById(id); return r ? toApiShape(r) : null; }
 function typeBits(row) { return row.metadata.type; }
 
-module.exports = { T, all, rowById, rowByName, get, getAvailable, isAvailable, toApiShape, typeBits, typeString };
+module.exports = {
+    supplementByName, T, all, rowById, rowByName, get, getAvailable, isAvailable, toApiShape, typeBits, typeString };

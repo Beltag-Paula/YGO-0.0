@@ -1078,7 +1078,7 @@ function getFlipEffect(cardName) {
 
 function triggerFlip(game, gc) {
     const handler = FLIP_EFFECTS[normalize(gc.card.name)];
-    if (!handler) return;
+    if (!handler || (gc.modifiers && gc.modifiers.effectsNegated)) return;
     game.recordFieldEvent("flip", gc);
     handler(game, gc);
 }
@@ -1168,6 +1168,9 @@ const TRAP_NEGATERS = new Set();
 const HAND_IGNITIONS = {};        // name -> { canActivate(game, gc), activate(game, gc) }
 const PASSIVE_NOTES = {};
 const NO_NORMAL_SUMMON = new Set();
+const NO_GRAVE_SUMMON = new Set();   // cards that cannot be Special Summoned from the Graveyard (the Cannon fusions)
+const GRAVE_END = {};                // name -> (game, gc, { sentThisTurn }) run at EVERY End Phase for cards in the Graveyard
+const ANY_SUMMON = {};               // name -> (game, src, summoned) run for face-up cards each time ANY monster is Summoned
 const TRIBUTE_FREE = {};            // name of a card in the GY -> (game, src, player, summonedCard) => true when it lets that Normal Summon skip its Tributes (Elemental HERO Necroshade)
 const PHASE_TRIGGERS = { standby: {}, end: {} };   // name -> (game, gc) for face-up cards, run at the owner's Standby / End Phase
 const BATTLE_DAMAGE_TRIGGERS = {};  // name -> (game, gc, amount, victim): this monster inflicted battle damage
@@ -1273,6 +1276,9 @@ const Registry = {
     stateCheck(name, fn) { STATE_CHECKS[normalize(name)] = fn; },
     attackAll(name) { ATTACK_ALL.add(normalize(name)); },
     noNormalSummon(name) { NO_NORMAL_SUMMON.add(normalize(name)); },
+    noGraveSummon(name) { NO_GRAVE_SUMMON.add(normalize(name)); },
+    graveEndPhase(name, fn) { GRAVE_END[normalize(name)] = fn; },
+    onAnySummon(name, fn) { ANY_SUMMON[normalize(name)] = fn; },
     tributeFree(name, fn) { TRIBUTE_FREE[normalize(name)] = fn; },
     unpartial(name) { delete PARTIAL_NOTES[normalize(name)]; },
     partial(name, note) { PARTIAL_NOTES[normalize(name)] = note || "Only part of the card text is implemented"; },
@@ -1302,6 +1308,9 @@ function scriptKinds(cardName) {
     if (HAND_IGNITIONS[n]) kinds.push("hand-ignition");
     if (NO_NORMAL_SUMMON.has(n)) kinds.push("special-summon-only");
     if (TRIBUTE_FREE[n]) kinds.push("tribute-free");
+    if (NO_GRAVE_SUMMON.has(n)) kinds.push("passive");
+    if (GRAVE_END[n]) kinds.push("grave-end-phase");
+    if (ANY_SUMMON[n]) kinds.push("summon-watcher");
     if (PHASE_TRIGGERS.end[n] || PHASE_TRIGGERS.standby[n]) kinds.push("phase-trigger");
     if (BATTLE_DAMAGE_TRIGGERS[n] || BATTLE_DESTROY_TRIGGERS[n]) kinds.push("battle-trigger");
     if (DIRECT_WHEN[n]) kinds.push("conditional-direct");
@@ -1395,7 +1404,28 @@ function cannotBeNormalSummon_unused() {}
 function allFaceUp(game, player) { return [...player.getMonstersOnField(), ...player.getSpellTrapsOnField()].filter(c => c.faceUp && !(c.modifiers && c.modifiers.effectsNegated)); }
 function runPhaseTriggers(game, kind, player) {
     for (const gc of allFaceUp(game, player)) { const fn = PHASE_TRIGGERS[kind][normalize(gc.card.name)]; if (fn) fn(game, gc); }
+    if (kind === "end") {
+        // Graveyard effects ("During the End Phase, if this card is in the GY because it was sent there this turn").
+        // A card that was already in the Graveyard at the previous End Phase carries a gyMark; new arrivals do not.
+        for (const p of [game.player1, game.player2]) {
+            for (const gc of [...p.zone.graveyard]) {
+                const fn = GRAVE_END[normalize(gc.card.name)];
+                if (fn) { try { fn(game, gc, { sentThisTurn: gc.state.gyMark === undefined }); } catch (e) { game.addLog(`(${gc.card.name}: ${e.message})`); } }
+            }
+        }
+        for (const p of [game.player1, game.player2]) p.zone.graveyard.forEach(gc => { gc.state.gyMark = game.turn; });
+    }
 }
+function runAnySummonHooks(game, summoned) {
+    for (const p of [game.player1, game.player2]) {
+        for (const src of [...p.getSpellTrapsOnField(), ...p.getMonstersOnField()]) {
+            if (!src.faceUp || src === summoned || (src.modifiers && src.modifiers.effectsNegated)) continue;
+            const fn = ANY_SUMMON[normalize(src.card.name)];
+            if (fn) { try { fn(game, src, summoned); } catch (e) { game.addLog(`(${src.card.name}: ${e.message})`); } }
+        }
+    }
+}
+function cannotSummonFromGrave(cardName) { return NO_GRAVE_SUMMON.has(normalize(cardName)); }
 function runBattleDamageTriggers(game, src, amount, victim) {
     if (!src || src.location !== "monster" || !src.faceUp || (src.modifiers && src.modifiers.effectsNegated)) return;
     const fn = BATTLE_DAMAGE_TRIGGERS[normalize(src.card.name)];
@@ -1424,7 +1454,7 @@ function cannotBeNormalSummoned(cardName) { return NO_NORMAL_SUMMON.has(normaliz
 function partialNote(cardName) { return PARTIAL_NOTES[normalize(cardName)] || null; }
 
 module.exports = {
-    tributeFreeSource, runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
+    tributeFreeSource, runAnySummonHooks, cannotSummonFromGrave, runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,

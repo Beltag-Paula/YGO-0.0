@@ -24,7 +24,7 @@ function install(Effects) {
         canPay: (game, gc) => L.mons(gc.owner).some(m => m !== gc),
         pay: (game, gc) => {
             const t = L.worst(game, L.mons(gc.owner).filter(m => m !== gc));
-            if (t) { L.destroy(game, t); game.addLog(`Panther Warrior Tributes ${t.card.name} to attack.`); }
+            if (t) { L.destroy(game, t); game.addLog(`Panther Warrior Tributes ${t.card.name} to attack.`); game.cleanupOrphanedEquips(); }
         }
     });
 

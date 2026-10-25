@@ -30,6 +30,8 @@ const clean = t => (t || "").replace(FOOTER, "").replace(/\([^)]*\)/g, " ").repl
 /** "1 FIRE monster your opponent controls" -> { n, all, upTo, side, zone, test } or null. */
 function parseSel(raw) {
     let s = " " + raw.trim().replace(/[.,]$/, "") + " ";
+    // "Name" + (qualifiers) + monster/card  => an ARCHETYPE (name contains); a lone "Name" => that exact card
+    const archetype = /"[^"]+"\s+(?:(?:Normal|Effect|Fusion|Ritual|Flip Effect|Tuner|Equip|Continuous|Quick-Play|Field|Counter|face-up|face-down)\s+)*(?:monsters?|cards?|Spell|Trap)\b/i.test(raw);
     const sel = { n: 1, all: false, upTo: false, side: "both", zone: "field", preds: [], noun: null, faceUp: false, faceDown: false };
     const eat = (re, fn) => { const m = re.exec(s); if (!m) return false; s = s.replace(re, " "); if (fn) fn(m); return true; };
 
@@ -70,7 +72,7 @@ function parseSel(raw) {
     for (const [w, race] of [["Equip", "Equip"], ["Quick-Play", "Quick-Play"], ["Continuous", "Continuous"], ["Field", "Field"], ["Counter", "Counter"]]) {
         if (eat(new RegExp(` ${w} (Spell|Trap)(?: Cards?)? `, "i"), m => { sel.noun = m[1].toLowerCase(); sel.preds.push(g => g.card.race === race); })) break;
     }
-    eat(/ "([^"]+)" (?=monsters? |cards? )/i, m => { const q = m[1].toLowerCase(); sel.preds.push(g => g.card.name.toLowerCase().includes(q)); });
+    if (archetype) eat(/ "([^"]+)" /i, m => { const q = m[1].toLowerCase(); sel.noun = sel.noun; sel.preds.push(g => g.card.name.toLowerCase().includes(q)); });
     eat(/ "([^"]+)" /i, m => { const q = m[1].toLowerCase(); sel.noun = sel.noun || "any"; sel.preds.push(g => g.card.name.toLowerCase() === q); });
     // noun
     if (!sel.noun) {

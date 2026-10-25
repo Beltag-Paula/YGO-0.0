@@ -638,7 +638,7 @@ class MainGame {
     // manually activated by their controller during their own Main Phase.
     // ------------------------------------------------------------------
     activateMonsterEffect(gc, targetInstanceId = null) {
-        if (!gc || gc.location !== "monster" || gc.owner !== this.currentPlayer) return false;
+        if (!gc || !["monster", "spellTrap"].includes(gc.location) || gc.owner !== this.currentPlayer) return false;
         if (gc.modifiers?.effectsNegated) {
             this.addLog(`${gc.card.name}'s effect is negated.`);
             return false;
@@ -890,6 +890,10 @@ class MainGame {
         }
 
         this.battleResponse = { defender };
+        if (this.choice) {                       // an attack-time effect (Fairy Box's coin call) is waiting for an answer: hold the damage step
+            this.state.awaitingResponse = true;
+            return true;
+        }
         const eligible = this.getEligibleResponses(defender);
         const handEligible = this.getEligibleHandResponses(defender);
         const quickMons = this.getEligibleQuickMonsters(defender);
@@ -1527,6 +1531,7 @@ class MainGame {
     }
 
     recordFieldEvent(kind, gc, extra = {}) {
+
         this.emit("field", {
             kind, id: gc.instanceId, owner: this.indexOf(gc.owner), name: gc.card.name,
             image: gc.card.image, faceUp: gc.faceUp, position: gc.position || null, ...extra
@@ -1540,6 +1545,7 @@ class MainGame {
             position: gc.position || null,
             ...extra
         };
+        if (kind === "summon" && gc.location === "monster") Effects.runAnySummonHooks(this, gc);
     }
 
     // True if `player`currently controls a face-up monster on the field

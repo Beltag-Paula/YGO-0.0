@@ -255,6 +255,11 @@ function evaluateAttack(game, attacker, target) {
         return -200;                                                 // my monster just dies for nothing
     }
 
+    if (!target.faceUp) {
+        // A Set monster: the AI can't see its DEF, so it does not know whether the attack is safe.
+        // Roughly a coin flip (like a human guessing), instead of "never attack a Set 2000 DEF monster".
+        return Math.random() < 0.5 ? 12 : -12;
+    }
     const targetDef = game.getDef(target);
     if (atkVal > targetDef) return 30 + (atkVal - targetDef);       // destroys their defender, no damage but tempo
     if (atkVal === targetDef) return 2;                              // harmless poke, nobody dies
@@ -301,6 +306,7 @@ function actBattlePhase(game) {
 
     for (const attacker of attackers) {
         for (const target of defenders) {
+            if (Effects.isAttackShielded(game, target, attacker)) continue;   // protected monsters can't be attacked: don't loop on an illegal attack
             const score = evaluateAttack(game, attacker, target);
             if (score > bestScore) {
                 bestScore = score;

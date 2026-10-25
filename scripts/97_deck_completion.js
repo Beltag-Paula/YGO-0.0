@@ -195,12 +195,12 @@ function install(Effects) {
     });
     R.partial("Awakening of the Crystal Ultimates", "Only the Special Summon option is implemented (no reveal cost, no Rainbow Bridge/Refraction option).");
 
-    def("Rainbow Refraction", { condition: (g, gc) => L.mons(gc.owner).some(m => /^rainbow (dark )?dragon$/i.test(m.card.name)) && gc.owner.zone.deck.some(isCB), aiUse: () => true }, (g, gc) => {
+    def("Rainbow Refraction", { window: "anytime", condition: (g, gc) => gc.owner._rainbowTurn === g.turn && L.mons(gc.owner).some(m => /^rainbow (dark )?dragon$/i.test(m.card.name)) && gc.owner.zone.deck.some(isCB), aiUse: () => true }, (g, gc) => {
         const o = gc.owner, names = new Map(); o.zone.deck.filter(isCB).forEach(c => { if (!names.has(c.card.name)) names.set(c.card.name, c); });
         const n = Math.min(names.size, 5 - L.mons(o).length); if (n <= 0) return;
         L.choose(g, o, { prompt: "Special Summon Crystal Beasts with different names", candidates: [...names.values()], min: 1, max: n, alwaysAsk: true }, picked => { picked.forEach(c => L.specialSummon(g, c, o)); o.shuffleDeck(); });
     });
-    R.partial("Rainbow Refraction", "The condition checks that Rainbow Dragon / Rainbow Dark Dragon is on the field, not that it activated an effect this turn.");
+
 
     // Continuous Crystal traps
     def("Crystal Brilliance", { aiUse: () => true }, (g, gc) => log(g, "Crystal Brilliance is active."));

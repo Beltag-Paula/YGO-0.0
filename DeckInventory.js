@@ -36,6 +36,22 @@ const OWNERS = {
 };
 const OWNER_IDS = Object.keys(OWNERS);
 
+/** Every picture in views/images/avatar, as /images/avatar/<file> URLs (usable for decks and for your duelist). */
+const AVATAR_DIR = path.join(__dirname, "views", "images", "avatar");
+function avatars() {
+    try {
+        return fs.readdirSync(AVATAR_DIR).filter(f => /\.(png|gif|jpe?g|webp)$/i.test(f)).sort()
+            .map(f => ({ file: f, url: "/images/avatar/" + encodeURIComponent(f), name: f.replace(/-DAR.*$/i, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/#U00e9/g, "é") }));
+    } catch (e) { return []; }
+}
+/** Accept only an avatar url that really exists in that folder (no path tricks). */
+function cleanAvatar(u) {
+    if (!u || typeof u !== "string") return null;
+    const m = /^\/images\/avatar\/([^/]+)$/.exec(u); if (!m) return null;
+    const f = decodeURIComponent(m[1]);
+    return avatars().some(a => a.file === f) ? "/images/avatar/" + encodeURIComponent(f) : null;
+}
+
 /** Which duelist does this deck belong to? Returns an OWNERS key or null. */
 function ownerOf(id, deck) {
     if (deck && OWNERS[deck.owner]) return deck.owner;
@@ -128,7 +144,8 @@ function summarize(id, deck, extra = {}) {
         id,
         owner,
         ownerName: owner ? OWNERS[owner].name : null,
-        portrait: owner ? OWNERS[owner].portrait : null,
+        avatar: cleanAvatar(deck.avatar),
+        portrait: cleanAvatar(deck.avatar) || (owner ? OWNERS[owner].portrait : null),
         builtin: !!OWNERS[id],
         custom: !!deck.custom,
         name: deck.name || deriveName(id, deck),
@@ -198,6 +215,7 @@ function cleanDeck(d) {
     const out = { mainDeck: arr(d.mainDeck), extraDeck: arr(d.extraDeck), sideDeck: arr(d.sideDeck) };
     if (d.name) out.name = String(d.name).trim().slice(0, 60);
     if (OWNERS[d.owner]) out.owner = d.owner;
+    const av = cleanAvatar(d.avatar); if (av) out.avatar = av;
     if (d.custom) out.custom = true;
     if (d.createdAt) out.createdAt = d.createdAt;
     return out;
@@ -228,4 +246,4 @@ function remove(id) {
     return true;
 }
 
-module.exports = { DIR, OWNERS, OWNER_IDS, ownerOf, list, readDeck, save, update, rename, remove, summarize, deriveName, safeId };
+module.exports = { avatars, cleanAvatar, DIR, OWNERS, OWNER_IDS, ownerOf, list, readDeck, save, update, rename, remove, summarize, deriveName, safeId };

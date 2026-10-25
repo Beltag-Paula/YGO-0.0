@@ -107,6 +107,7 @@ router.post("/decks", upload.single("deck"), async (req, res) => {
 });
 
 // ---- deck builder: card pool + create / edit deck from card ids -----------------------------
+router.get("/avatars", (req, res) => res.json({ avatars: DeckInventory.avatars() }));
 router.get("/cards", (req, res) => res.json(DeckBuilder.search(req.query)));
 router.get("/cards/meta", (req, res) => res.json({ ...DeckBuilder.meta(), owners: Object.entries(DeckInventory.OWNERS).map(([id, o]) => ({ id, name: o.name, portrait: o.portrait })) }));
 
@@ -114,14 +115,14 @@ router.get("/decks/:id/ids", (req, res) => {
     const deck = DeckInventory.readDeck(req.params.id);
     if (!deck) return res.status(404).json({ error: "Deck not found" });
     const s = DeckInventory.summarize(req.params.id, deck);
-    res.json({ id: s.id, name: s.name, owner: s.owner, builtin: s.builtin, ...DeckBuilder.toIds(deck) });
+    res.json({ id: s.id, name: s.name, owner: s.owner, avatar: s.avatar, builtin: s.builtin, ...DeckBuilder.toIds(deck) });
 });
 
 function builderSave(req, res, id) {
     try {
         const b = req.body || {};
         const { deck, warnings } = DeckBuilder.assemble(b);
-        const meta = { name: String(b.name || "").trim() || "New Deck", owner: b.owner, custom: true };
+        const meta = { name: String(b.name || "").trim() || "New Deck", owner: b.owner, avatar: b.avatar, custom: true };
         if (id) {
             if (!DeckInventory.update(id, { ...deck, ...meta })) return res.status(404).json({ error: "Deck not found" });
             return res.json({ id, warnings, message: "Deck saved." });
@@ -154,7 +155,7 @@ router.post("/duel/start", (req, res) => {
         if (!botDeck || botDeck === "random") botDeck = decks[Math.floor(Math.random() * decks.length)].id;
         if (!b.playerDeck) return res.status(400).json({ error: "Choose your deck first." });
         const duel = new DuelSession({
-            playerDeckId: b.playerDeck, botDeckId: botDeck, first: b.first, playerName: b.playerName
+            playerDeckId: b.playerDeck, botDeckId: botDeck, first: b.first, playerName: b.playerName, playerAvatar: b.playerAvatar
         });
         sessions.set(sid, { duel, touched: Date.now() });
         res.json(duel.state());

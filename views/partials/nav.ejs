@@ -30,4 +30,18 @@
       (d.counts.extra ? ' · ' + d.counts.extra + ' Extra' : '') + '</small></div>';
   };
   window.caseClass = d => 'deck-case' + (d && d.portrait ? ' has-owner' : '');
+  // Avatar picker modal: resolves to a /images/avatar/... url, '' for "none/default", or null when cancelled.
+  window.pickAvatar = async function (current) {
+    const { avatars } = await (await fetch('/api/avatars')).json();
+    return new Promise(res => {
+      const back = document.createElement('div'); back.className = 'modal-back on';
+      back.innerHTML = '<div class="panel modal" style="width:min(820px,94vw)"><h3>Choose an avatar</h3><div class="avatar-grid"></div><div class="row-end"><button class="btn ghost small" data-d>Use default</button><button class="btn ghost small" data-c>Cancel</button></div></div>';
+      const grid = back.querySelector('.avatar-grid');
+      avatars.forEach(a => { const b = document.createElement('button'); b.className = 'av' + (a.url === current ? ' on' : ''); b.title = a.name; b.innerHTML = '<img loading="lazy" src="' + a.url + '" alt=""><span>' + a.name + '</span>'; b.onclick = () => done(a.url); grid.appendChild(b); });
+      const done = v => { back.remove(); res(v); };
+      back.querySelector('[data-c]').onclick = () => done(null); back.querySelector('[data-d]').onclick = () => done('');
+      back.onclick = e => { if (e.target === back) done(null); };
+      document.body.appendChild(back);
+    });
+  };
 </script>

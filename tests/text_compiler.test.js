@@ -58,3 +58,14 @@ test("compiled passive sentences: summon restrictions and stat auras", () => {
     assert.equal(E.cannotBeNormalSummoned("Vennominaga the Deity of Poisonous Snakes"), true);
     assert.ok(E.scriptKinds("Gaia Power").includes("continuous"));
 });
+
+test("engine hooks: Slifer weakens opposing summons; Cannons cannot return from the GY; Hysteric Sign GY effect", () => {
+    const d = makeDuel({ p1: { monsters: ["Slifer the Sky Dragon"] }, p2: { hand: ["Summoned Skull"] } });
+    const sk = d.find(d.p2, "Summoned Skull", "hand");
+    require("../scripts/_lib").specialSummon(d.game, sk, d.p2);
+    assert.ok(d.game.getAtk(sk) <= 500, "Summoned Skull lost 2000 ATK");
+    const g2 = makeDuel({ p1: { graveyard: ["XYZ-Dragon Cannon"] } });
+    assert.equal(require("../scripts/_lib").specialSummon(g2.game, g2.find(g2.p1, "XYZ-Dragon Cannon", "graveyard"), g2.p1), false);
+    const Effects = require("../Effects");
+    assert.ok(Effects.scriptKinds("Hysteric Sign").includes("grave-end-phase"));
+});

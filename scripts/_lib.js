@@ -46,6 +46,7 @@ const L = {
     specialSummon(game, gc, controller, opts = {}) {
         if (controller.getFreeMonsterSlot() === -1) return false;
         if (controller.noSpecialSummonTurn === game.turn) { game.addLog(`${controller.name} cannot Special Summon monsters this turn.`); return false; }
+        if (gc.location === "graveyard" && Effects.cannotSummonFromGrave(gc.card.name)) { game.addLog(`${gc.card.name} cannot be Special Summoned from the Graveyard.`); return false; }
         if (Effects.cannotBeSpecialSummoned(gc.card.name)) { game.addLog(`${gc.card.name} cannot be Special Summoned.`); return false; }
         if (gc.location === "extraDeck" && game.extraDeckLocked && game.extraDeckLocked(controller)) { game.addLog("You cannot Special Summon monsters from the Extra Deck."); return false; }
         const from = gc.location;

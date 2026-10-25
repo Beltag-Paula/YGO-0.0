@@ -48,7 +48,7 @@ function install(Effects) {
         timing: (g, gc, mode) => (mode === "idle" ? g.currentPlayer === gc.owner && ["m1", "battle", "m2"].includes(g.phase) : true),
         canActivate: (g, gc) => !gc.state.hasBeenSummonedThisTurn && L.mons(gc.owner).some(m => isCB(m)),
         resolve: (g, gc) => {
-            const cb = L.mons(gc.owner).filter(isCB);
+            const cb = L.mons(gc.owner).filter(isCB); gc.owner._rainbowTurn = g.turn;
             cb.forEach(m => { m._noReplace = true; L.send(m, "graveyard"); });
             gc.modifiers.atk += 1000 * cb.length;
             g.addLog(`Rainbow Dragon sends ${cb.length} Crystal Beast(s) to the Graveyard and gains ${1000 * cb.length} ATK!`);
@@ -57,6 +57,7 @@ function install(Effects) {
     R.ignition("Rainbow Dragon", {
         canActivate: (g, gc) => !gc.state.hasBeenSummonedThisTurn && gc.owner.zone.graveyard.some(isCB),
         activate: (g, gc) => {
+            gc.owner._rainbowTurn = g.turn;
             gc.owner.zone.graveyard.filter(isCB).forEach(c => L.send(c, "banished"));
             const all = [...L.allMons(g), ...L.allSTs(g)];
             all.forEach(intoDeck); [g.player1, g.player2].forEach(p => p.shuffleDeck());
@@ -185,7 +186,7 @@ function install(Effects) {
     R.ignition("Rainbow Dark Dragon", {
         canActivate: (g, gc) => [...L.mons(gc.owner).filter(m => m !== gc), ...gc.owner.zone.graveyard].some(c => L.isMonster(c) && c.card.attribute === "DARK"),
         activate: (g, gc) => {
-            const o = gc.owner, dark = [...L.mons(o).filter(m => m !== gc && m.card.attribute === "DARK"), ...o.zone.graveyard.filter(c => L.isMonster(c) && c.card.attribute === "DARK")];
+            const o = gc.owner; o._rainbowTurn = g.turn; const dark = [...L.mons(o).filter(m => m !== gc && m.card.attribute === "DARK"), ...o.zone.graveyard.filter(c => L.isMonster(c) && c.card.attribute === "DARK")];
             dark.forEach(c => L.send(c, "banished")); gc.modifiers.atk += 500 * dark.length;
             g.addLog(`Rainbow Dark Dragon banishes ${dark.length} DARK monster(s) and gains ${500 * dark.length} ATK!`);
             return true;

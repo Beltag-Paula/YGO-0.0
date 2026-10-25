@@ -43,7 +43,7 @@ class DuelSession {
         const bs = DeckInventory.summarize(o.botDeckId, botDeck);
 
         this.human = new Player((o.playerName || "You").slice(0, 24), humanDeck);
-        this.human.profile = { avatar: hs.portrait || null, deckName: hs.name, deckId: o.playerDeckId };
+        this.human.profile = { avatar: DeckInventory.cleanAvatar(o.playerAvatar) || hs.portrait || null, deckName: hs.name, deckId: o.playerDeckId };
         const botName = bs.ownerName || "Duel Bot";
         this.bot = new Player(botName, botDeck);
         this.bot.profile = { avatar: bs.portrait || null, deckName: bs.name, deckId: o.botDeckId };
@@ -481,6 +481,14 @@ class DuelSession {
             if (chk.ok) {
                 if (chk.quick) act.quick = true;                    // a face-up card's own effect (Ultimate Offering)
                 else if (!gc.faceUp) act.activate = { target: this._targetsView(chk.targets) };
+            }
+            // A face-up Spell/Trap with its own Main Phase effect (Spark Blaster: "During your Main Phase: you can ...")
+            if (gc.faceUp && main && where === "spellTrap") {
+                const ign = g.getIgnitionMeta && g.getIgnitionMeta(gc.card.name);
+                if (ign) {
+                    let ok = false; try { ok = ign.canActivate(g, gc); } catch (e) { ok = false; }
+                    if (ok) act.effect = { target: this._targetsView(null) };
+                }
             }
         }
         return act;

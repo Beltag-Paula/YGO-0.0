@@ -44,6 +44,16 @@ function avatars() {
             .map(f => ({ file: f, url: "/images/avatar/" + encodeURIComponent(f), name: f.replace(/-DAR.*$/i, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/#U00e9/g, "é") }));
     } catch (e) { return []; }
 }
+/** Icon frames (views/images/frames) that can surround a round avatar. */
+const FRAME_DIR = path.join(__dirname, "views", "images", "frames");
+function frames() { try { return fs.readdirSync(FRAME_DIR).filter(f => /\.png$/i.test(f)).sort(); } catch (e) { return []; } }
+function cleanFrame(f) { return typeof f === "string" && frames().includes(f) ? f : null; }
+/** The frame each duelist's deck wears by default (the user's own choice always wins). */
+const OWNER_FRAMES = {
+    yugi: "Dark_Magical_Circle-Icon_Frame-Master_Duel.png", kaiba: "Blue-Eyes_White_Dragon-Icon_Frame-Master_Duel.png",
+    joey: "Link_Master_Frame-Icon_Frame-Master_Duel.png", mai: "Flock_Together-Icon_Frame-Master_Duel.png",
+    jesse: "Frost_Frame-Icon_Frame-Master_Duel.png", jaden: "Neon_Sign-Icon_Frame-Master_Duel.png"
+};
 /** Accept only an avatar url that really exists in that folder (no path tricks). */
 function cleanAvatar(u) {
     if (!u || typeof u !== "string") return null;
@@ -146,6 +156,7 @@ function summarize(id, deck, extra = {}) {
         ownerName: owner ? OWNERS[owner].name : null,
         avatar: cleanAvatar(deck.avatar),
         portrait: cleanAvatar(deck.avatar) || (owner ? OWNERS[owner].portrait : null),
+        frame: cleanFrame(deck.frame) || (owner ? OWNER_FRAMES[owner] : null) || null,
         builtin: !!OWNERS[id],
         custom: !!deck.custom,
         name: deck.name || deriveName(id, deck),
@@ -216,6 +227,7 @@ function cleanDeck(d) {
     if (d.name) out.name = String(d.name).trim().slice(0, 60);
     if (OWNERS[d.owner]) out.owner = d.owner;
     const av = cleanAvatar(d.avatar); if (av) out.avatar = av;
+    const fr = cleanFrame(d.frame); if (fr) out.frame = fr;
     if (d.custom) out.custom = true;
     if (d.createdAt) out.createdAt = d.createdAt;
     return out;
@@ -246,4 +258,4 @@ function remove(id) {
     return true;
 }
 
-module.exports = { avatars, cleanAvatar, DIR, OWNERS, OWNER_IDS, ownerOf, list, readDeck, save, update, rename, remove, summarize, deriveName, safeId };
+module.exports = { frames, cleanFrame, OWNER_FRAMES, avatars, cleanAvatar, DIR, OWNERS, OWNER_IDS, ownerOf, list, readDeck, save, update, rename, remove, summarize, deriveName, safeId };

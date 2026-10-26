@@ -338,6 +338,11 @@ function install(Effects) {
             }
             // ---------------- Monsters ----------------
             if (!(t & LocalCards.T.MONSTER)) continue;
+            if (/Gemini/.test(c.type)) {      // Normal Monster until Gemini Summoned; the effect is the part after the bullet
+                const m = /[●•]\s*(.+)$/s.exec(text);
+                if (m) { const before = Effects.scriptKinds(name).length; compileMonsterCard(R, name, m[1].trim(), t, stats, ok); if (Effects.scriptKinds(name).length > before) R.gemini(name); }
+                continue;
+            }
             compileMonsterCard(R, name, text, t, stats, ok);
         } catch (e) { stats.skipped++; }
     }
@@ -353,6 +358,7 @@ function compileMonsterCard(R, name, text, t, stats, ok) {
     const ex = extractPassives(text);
     for (const p of ex.passives) {
         if (p.upkeep) R.standbyTrigger(name, (g, gc) => { if (gc.owner.lifePoints > p.upkeep) { gc.owner.lifePoints -= p.upkeep; log(g, `${gc.owner.name} pays ${p.upkeep} LP to keep ${gc.card.name}.`); } else { log(g, `${gc.card.name} is destroyed (LP not paid).`); L.destroy(g, gc); } });
+        if (p.attackAll) R.attackAll(name);
         if (p.noNormal) { R.noNormalSummon(name); R.noSet(name); }
         if (p.noSpecial) R.noSpecialSummon(name);
         if (p.battleInd) R.battleIndestructible(name);
@@ -481,6 +487,7 @@ let PARTIAL = false;
 const PASSIVE_SENT = [
     [/^Once per turn, during your Standby Phase,? (?:you must )?pay (\d[\d,]*) (?:Life Points|LP)(?: \(this is not optional\))?,? or (?:this card is destroyed|destroy this card)\.?$/i, m => ({ upkeep: num(m[1]) })],
     [/^If this card is in face-up Defense Position, destroy it\.?$/i, () => ({ noDefense: true })],
+    [/^This card can attack all monsters your opponent controls(?: once each)?\.?$/i, () => ({ attackAll: true })],
     [/^(?:This (?:card|monster) )?[Cc]annot be Normal Summoned(?: or Set|\/Set)\.?$/, () => ({ noNormal: true })],
     [/^(?:This (?:card|monster) )?[Cc]annot be Special Summoned\.?$/, () => ({ noSpecial: true })],
     [/^(?:This (?:card|monster) )?[Cc]annot be destroyed by battle\.?$/, () => ({ battleInd: true })],

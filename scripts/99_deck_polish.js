@@ -119,6 +119,82 @@ function install(Effects) {
     const prevBubble = Effects.getOnSummon("Elemental HERO Bubbleman");
     const wrapped = (g, gc) => { bubbleDraw(g, gc); prevBubble(g, gc); };
     wrapped.anySummon = true; R.onSummon("Elemental HERO Bubbleman", wrapped);
+
+    // ===================================================================================================================
+    // GEMINI monsters (Normal Monsters until Gemini Summoned — see MainGame.geminiSummon). Written from the ● effect text.
+    // ===================================================================================================================
+    const free2 = p => p.getFreeMonsterSlot() !== -1;
+    const once = (gc, g) => gc.state.geminiUsed !== g.turn;
+    R.gemini("Goggle Golem", (g, gc) => { gc.modifiers.atk += 2100 - (gc.card.atk || 0); log(g, "Goggle Golem's ATK becomes 2100."); });
+    R.gemini("Dawnbreak Gardna", (g, gc) => { gc.modifiers.def += 2300 - (gc.card.def || 0); log(g, "Dawnbreak Gardna's DEF becomes 2300."); });
+    R.gemini("Phantom Dragonray Bronto", (g, gc) => { gc.modifiers.atk += 2300 - (gc.card.atk || 0); log(g, "Phantom Dragonray Bronto's ATK becomes 2300."); });
+    R.attackHook("Phantom Dragonray Bronto", (g, src, attacker) => {
+        if (attacker !== src || !src.state.geminiActive) return;
+        g.turnEffects.push(() => { if (src.location === "monster" && src.faceUp) src.position = "defense"; });
+    });
+    R.partial("Phantom Dragonray Bronto", "ATK 2300 and the switch to Defense Position after attacking work (at the End Phase); the lock on changing its battle position is not implemented.");
+    R.piercing("Gemini Lancer"); R.gemini("Gemini Lancer");
+    R.secondAttack("Chthonian Emperor Dragon"); R.gemini("Chthonian Emperor Dragon");
+    R.gemini("Aquarian Alessa");
+    R.battleDestroyTrigger("Aquarian Alessa", (g, gc) => {
+        if (!gc.state.geminiActive) return; const f = foe(g, gc), c = f.zone.hand[Math.floor(Math.random() * f.zone.hand.length)];
+        if (c) { L.send(c, "graveyard"); log(g, `Aquarian Alessa: ${f.name} discards ${c.card.name} at random.`); }
+    });
+    R.gemini("Lucky Pied Piper");
+    R.battleDestroyTrigger("Lucky Pied Piper", (g, gc) => { if (gc.state.geminiActive) { gc.owner.drawCard(1); log(g, `Lucky Pied Piper: ${gc.owner.name} draws 1 card.`); } });
+    R.gemini("Infinity Dark");
+    R.attackHook("Infinity Dark", (g, src, attacker) => {
+        if (attacker !== src || !src.state.geminiActive) return;
+        const c = L.mons(foe(g, src)).filter(m => m.faceUp); if (!c.length) return;
+        L.choose(g, src.owner, { prompt: "Infinity Dark: change the battle position of 1 face-up monster your opponent controls", candidates: c, min: 1, max: 1, onField: true, optional: true, alwaysAsk: true, aiPick: (gm, cs) => [L.best(gm, cs)] },
+            ([t]) => { t.position = t.position === "attack" ? "defense" : "attack"; log(g, `Infinity Dark changes ${t.card.name} to ${t.position} position.`); });
+    });
+    R.gemini("Ancient Gear Knight");
+    R.partial("Ancient Gear Knight", "Registered as a Gemini monster; blocking the opponent's Spell/Trap Cards during its attack is not implemented.");
+    R.gemini("Magical Reflect Slime");
+    R.battleDamageReducer("Magical Reflect Slime", (g, src, player, amount) => {
+        const b = g.currentBattle; if (!src.state.geminiActive || !b || !(b.attacker === src || b.target === src) || player !== src.owner) return amount;
+        foe(g, src).dealDamage(amount); log(g, `Magical Reflect Slime: ${foe(g, src).name} takes the ${amount} battle damage instead!`); return 0;
+    });
+    R.gemini("Elemental HERO Neos Alius", (g, gc) => {
+        const o = gc.card; gc._nameBackup2 = o;
+        gc.card = Object.assign(Object.create(Object.getPrototypeOf(o)), o, { name: "Elemental HERO Neos" });
+        log(g, "Elemental HERO Neos Alius's name becomes \"Elemental HERO Neos\" while on the field.");
+    });
+    R.partial("Elemental HERO Neos Alius", "The name change works; the engine then reads effects by the new name (Neos has none), and the original name is not restored when it leaves the field.");
+    const summonFrom = (name, test, zonesOf, tie) => {
+        R.gemini(name);
+        R.ignition(name, {
+            canActivate: (g, gc) => gc.faceUp && gc.state.geminiActive && once(gc, g) && free2(gc.owner) && zonesOf(g, gc).some(test),
+            activate: (g, gc) => L.choose(g, gc.owner, { prompt: `${name}: Special Summon 1 monster`, candidates: zonesOf(g, gc).filter(test), min: 1, max: 1, alwaysAsk: true, aiPick: (gm, cs) => [L.best(gm, cs)] }, ([t]) => {
+                gc.state.geminiUsed = g.turn; L.specialSummon(g, t, gc.owner); log(g, `${name} Special Summons ${t.card.name}.`);
+                if (tie) { gc.state.summoned = (gc.state.summoned || []).concat(t); gc.linkedRevert = () => { (gc.state.summoned || []).forEach(m => { if (m.location === "monster") L.destroy(g, m); }); log(g, `${name} left the field — the monsters it summoned are destroyed.`); gc.state.summoned = []; }; }
+            }) || true
+        });
+    };
+    summonFrom("Gigaplant", m => L.isMonster(m) && (m.card.race === "Insect" || m.card.race === "Plant"), (g, gc) => [...gc.owner.zone.hand, ...gc.owner.zone.graveyard], false);
+    summonFrom("Il Blud", m => L.isMonster(m) && m.card.race === "Zombie", (g, gc) => [...gc.owner.zone.hand, ...gc.owner.zone.graveyard, ...foe(g, gc).zone.graveyard], true);
+    summonFrom("Doom Shaman", m => L.isMonster(m) && m.card.race === "Fiend", (g, gc) => [...gc.owner.zone.hand, ...gc.owner.zone.graveyard, ...foe(g, gc).zone.graveyard], true);
+    R.gemini("Future Samurai");
+    R.ignition("Future Samurai", {
+        canActivate: (g, gc) => gc.faceUp && gc.state.geminiActive && once(gc, g) && gc.owner.zone.graveyard.some(L.isMonster) && L.allMons(g).some(m => m.faceUp && m !== gc),
+        activate: (g, gc) => L.choose(g, gc.owner, { prompt: "Future Samurai: banish 1 monster from your Graveyard", candidates: gc.owner.zone.graveyard.filter(L.isMonster), min: 1, max: 1, alwaysAsk: true, aiPick: (gm, c) => [L.worst(gm, c)] }, ([cost]) => {
+            const t = L.allMons(g).filter(m => m.faceUp && m !== gc && !Effects.isUntargetable(m.card.name));
+            L.choose(g, gc.owner, { prompt: "Future Samurai: destroy 1 face-up monster", candidates: t, min: 1, max: 1, onField: true, alwaysAsk: true, aiPick: (gm, c) => [L.best(gm, c.filter(x => x.owner !== gc.owner)) || c[0]] }, ([x]) => { gc.state.geminiUsed = g.turn; L.send(cost, "banished"); L.destroy(g, x); log(g, `Future Samurai destroys ${x.card.name}.`); });
+        }) || true
+    });
+    R.gemini("Blazewing Butterfly");
+    R.ignition("Blazewing Butterfly", {
+        canActivate: (g, gc) => gc.faceUp && gc.state.geminiActive && gc.owner.zone.graveyard.some(m => L.isMonster(m) && /Gemini/.test(m.card.type) && !L.is(m, "Blazewing Butterfly")),
+        activate: (g, gc) => L.choose(g, gc.owner, { prompt: "Blazewing Butterfly: Special Summon 1 Gemini monster from your Graveyard", candidates: gc.owner.zone.graveyard.filter(m => L.isMonster(m) && /Gemini/.test(m.card.type) && !L.is(m, "Blazewing Butterfly")), min: 1, max: 1, alwaysAsk: true, aiPick: (gm, c) => [L.best(gm, c)] }, ([t]) => {
+            gc._noReplace = true; L.send(gc, "graveyard"); log(g, "Blazewing Butterfly is Tributed.");
+            if (L.specialSummon(g, t, gc.owner)) { Effects.geminiActivate(g, t); log(g, `${t.card.name} comes back as an Effect Monster.`); }
+        }) || true
+    });
+    R.gemini("Dark Valkyria");
+    R.partial("Dark Valkyria", "Registered as a Gemini monster only: its Spell Counter effects are not implemented (no Spell Counters in the engine yet).");
+    R.gemini("Alien Hypno");
+    R.partial("Alien Hypno", "Registered as a Gemini monster only: A-Counters and taking control are not implemented.");
 }
 
 /**

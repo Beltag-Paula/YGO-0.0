@@ -959,8 +959,10 @@ function getHandResponseEffect(cardName) {
 
 // Monsters whose battle damage pierces through Defense Position monsters.
 const PIERCING_MONSTERS = new Set(["spear dragon"]);
-function hasPiercing(cardName) {
-    return PIERCING_MONSTERS.has(normalize(cardName));
+function negatedCard(x) { return !!(x && typeof x === "object" && x.modifiers && x.modifiers.effectsNegated); }
+function nameOf(x) { return typeof x === "string" ? x : x.card.name; }
+function hasPiercing(x) {
+    return !negatedCard(x) && PIERCING_MONSTERS.has(normalize(nameOf(x)));
 }
 
 // Monsters that cannot declare a direct attack even with an empty
@@ -1168,6 +1170,7 @@ const TRAP_NEGATERS = new Set();
 const HAND_IGNITIONS = {};        // name -> { canActivate(game, gc), activate(game, gc) }
 const PASSIVE_NOTES = {};
 const NO_NORMAL_SUMMON = new Set();
+const GEMINI = {};                  // name -> (game, gc) run once when the card is Gemini Summoned (it is a Normal Monster until then)
 const NO_GRAVE_SUMMON = new Set();   // cards that cannot be Special Summoned from the Graveyard (the Cannon fusions)
 const GRAVE_END = {};                // name -> (game, gc, { sentThisTurn }) run at EVERY End Phase for cards in the Graveyard
 const ANY_SUMMON = {};               // name -> (game, src, summoned) run for face-up cards each time ANY monster is Summoned
@@ -1276,6 +1279,7 @@ const Registry = {
     stateCheck(name, fn) { STATE_CHECKS[normalize(name)] = fn; },
     attackAll(name) { ATTACK_ALL.add(normalize(name)); },
     noNormalSummon(name) { NO_NORMAL_SUMMON.add(normalize(name)); },
+    gemini(name, onActivate) { GEMINI[normalize(name)] = onActivate || (() => {}); },
     noGraveSummon(name) { NO_GRAVE_SUMMON.add(normalize(name)); },
     graveEndPhase(name, fn) { GRAVE_END[normalize(name)] = fn; },
     onAnySummon(name, fn) { ANY_SUMMON[normalize(name)] = fn; },
@@ -1309,6 +1313,7 @@ function scriptKinds(cardName) {
     if (NO_NORMAL_SUMMON.has(n)) kinds.push("special-summon-only");
     if (TRIBUTE_FREE[n]) kinds.push("tribute-free");
     if (NO_GRAVE_SUMMON.has(n)) kinds.push("passive");
+    if (GEMINI[n]) kinds.push("gemini");
     if (GRAVE_END[n]) kinds.push("grave-end-phase");
     if (ANY_SUMMON[n]) kinds.push("summon-watcher");
     if (PHASE_TRIGGERS.end[n] || PHASE_TRIGGERS.standby[n]) kinds.push("phase-trigger");
@@ -1415,6 +1420,7 @@ function runPhaseTriggers(game, kind, player) {
         }
         for (const p of [game.player1, game.player2]) p.zone.graveyard.forEach(gc => { gc.state.gyMark = game.turn; });
     }
+    if (game.cleanupOrphanedEquips) game.cleanupOrphanedEquips();   // a phase trigger may have removed a host (Obelisk's End Phase send): its Equip Cards go too
 }
 function runAnySummonHooks(game, summoned) {
     for (const p of [game.player1, game.player2]) {
@@ -1442,7 +1448,11 @@ function canAttackDirectlyNow(game, gc) {
     return !!(fn && gc.faceUp && !(gc.modifiers && gc.modifiers.effectsNegated) && fn(game, gc));
 }
 function isTrapImmune(cardName) { return TRAP_IMMUNE.has(normalize(cardName)); }
-function hasAttackAll(cardName) { return ATTACK_ALL.has(normalize(cardName)); }
+function hasAttackAll(x) { return !negatedCard(x) && ATTACK_ALL.has(normalize(nameOf(x))); }
+/** Gemini monsters are Normal Monsters (effects off) until they are Gemini Summoned. */
+function isGemini(cardName) { return !!GEMINI[normalize(cardName)]; }
+function geminiOnSummoned(gc) { if (isGemini(gc.card.name)) { gc.state.geminiActive = false; gc.modifiers.effectsNegated = true; } }
+function geminiActivate(game, gc) { gc.state.geminiActive = true; gc.modifiers.effectsNegated = false; const fn = GEMINI[normalize(gc.card.name)]; if (fn) fn(game, gc); }
 function runStateChecks(game) {
     for (const p of [game.player1, game.player2]) for (const gc of allFaceUp(game, p)) { const fn = STATE_CHECKS[normalize(gc.card.name)]; if (fn) fn(game, gc); }
 }
@@ -1454,7 +1464,7 @@ function cannotBeNormalSummoned(cardName) { return NO_NORMAL_SUMMON.has(normaliz
 function partialNote(cardName) { return PARTIAL_NOTES[normalize(cardName)] || null; }
 
 module.exports = {
-    tributeFreeSource, runAnySummonHooks, cannotSummonFromGrave, runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
+    isGemini, geminiOnSummoned, geminiActivate, tributeFreeSource, runAnySummonHooks, cannotSummonFromGrave, runPhaseTriggers, runBattleDamageTriggers, runBattleDestroyTriggers, canAttackDirectlyNow, isTrapImmune, hasAttackAll, runStateChecks, reduceBattleDamage, runAttackHooks, isAttackRestricted, sendsToBanishInstead, isBattleIndestructible, cannotBeSpecialSummoned, getDestroyProtection, getDrawPhaseTrigger, isAttackShielded, getQuickEffect, isUntargetable, hasNoSummonResponse, noSetMonster, getTributeOverride, getDestroyReplacement, getDirectAttacker, cannotBeNormalSummoned, partialNote, Registry, scriptKinds, altTributeCounts, continuousStatFor, getAttackCost, hasSecondAttack, trapsNegated, getHandIgnition,
     getMeta, getFusionRecipe, getRitualRecipe, activate, normalize,
     getFlipEffect, triggerFlip, getDynamicStats, triggerGYEffect,
     getOnSummon, triggerOnSummon, getIgnition,

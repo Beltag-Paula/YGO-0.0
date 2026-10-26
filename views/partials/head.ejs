@@ -3,4 +3,16 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script>
+  (function () { try { document.documentElement.dataset.theme = localStorage.getItem('ygo.theme') || 'blue'; } catch (e) { document.documentElement.dataset.theme = 'blue'; } })();
+  window.THEMES = ['blue', 'red', 'yellow', 'purple'];
+  window.setTheme = function (t) {
+    if (!window.THEMES.includes(t)) t = 'blue';
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem('ygo.theme', t); } catch (e) { /* private mode */ }
+    document.querySelectorAll('.theme-swatches button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+    window.dispatchEvent(new CustomEvent('themechange', { detail: t }));
+  };
+</script>
+<script src="/static/js/frames.js"></script>
 <link rel="stylesheet" href="/static/css/md.css">

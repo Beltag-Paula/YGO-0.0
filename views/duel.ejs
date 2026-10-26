@@ -19,7 +19,7 @@
     <div id="thinking" style="display:none">OPPONENT IS THINKING <i></i><i></i><i></i></div>
   </div>
 
-  <div id="mini"><button id="btnSnd" title="Sound">🔊</button><button id="btnSurr" title="Surrender">🏳</button><button id="btnLeave" title="Back to menu">⌂</button></div>
+  <div id="mini"><button id="btnTheme" title="Change colour theme">◈</button><button id="btnSnd" title="Sound">🔊</button><button id="btnSurr" title="Surrender">🏳</button><button id="btnLeave" title="Back to menu">⌂</button></div>
 
   <div id="cmd"></div>
   <div id="hint"></div>
@@ -39,4 +39,5 @@
 <script src="/static/js/sfx.js"></script>
 <script src="/static/js/fx.js"></script>
 <script src="/static/js/duel.js"></script>
+<script>document.getElementById("btnTheme").onclick = () => { const i = THEMES.indexOf(document.documentElement.dataset.theme); setTheme(THEMES[(i + 1) % THEMES.length]); };</script>
 </body></html>

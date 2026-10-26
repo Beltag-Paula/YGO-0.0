@@ -10,7 +10,7 @@
 </div>
 <div class="setup-footer">
   <div><div class="sub" style="margin:0 0 6px;font-size:12px">YOUR DUELIST</div>
-    <button class="avatar-btn" id="bAvatar"><img id="avImg" src="/images/avatar/Kuriboh-DAR.png" alt=""><span id="avName">Auto</span></button></div>
+    <button class="avatar-btn" id="bAvatar"><span class="av-mini" id="avImg"></span><span id="avName">Auto</span></button></div>
   <div><div class="sub" style="margin:0 0 6px;font-size:12px">TURN ORDER</div>
     <div class="seg" id="first"><button data-v="random" class="on">Random</button><button data-v="you">I go first</button><button data-v="bot">Bot first</button></div></div>
   <div style="flex:1"></div>
@@ -19,7 +19,7 @@
 </div>
 <script>
 const $ = id => document.getElementById(id);
-let myAvatar = '', decks = [], mine = null, theirs = 'random', first = 'random';
+let myAvatar = '', myFrame = '', decks = [], mine = null, theirs = 'random', first = 'random';
 const params = new URLSearchParams(location.search);
 function caseEl(d, kind) {
   const el = document.createElement('div'); el.className = caseClass(d) + ((kind === 'mine' ? mine : theirs) === d.id ? ' sel' + (kind === 'theirs' ? ' opp' : '') : '');
@@ -46,8 +46,8 @@ document.querySelectorAll('#first button').forEach(b => b.onclick = () => { firs
 $('go').onclick = async () => {
   $('go').disabled = true; $('go').textContent = 'Shuffling…';
   try {
-    localStorage.setItem('ygo.mine', mine); localStorage.setItem('ygo.avatar', myAvatar); localStorage.setItem('ygo.theirs', theirs);
-    await api('/api/duel/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playerDeck: mine, botDeck: theirs, first, playerAvatar: myAvatar }) });
+    localStorage.setItem('ygo.mine', mine); localStorage.setItem('ygo.avatar', myAvatar); localStorage.setItem('ygo.frame', myFrame); localStorage.setItem('ygo.theirs', theirs);
+    await api('/api/duel/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playerDeck: mine, botDeck: theirs, first, playerAvatar: myAvatar, playerFrame: myFrame }) });
     location.href = '/duel/play';
   } catch (e) { toast(e.message, true); $('go').disabled = false; $('go').textContent = 'Start Duel'; }
 };
@@ -57,14 +57,14 @@ $('go').onclick = async () => {
   const pick = id => decks.find(d => d.id === id) ? id : null;
   mine = pick(params.get('deck')) || pick(ls('ygo.mine')) || (decks[0] && decks[0].id);
   const lt = ls('ygo.theirs'); theirs = lt === 'random' || pick(lt) ? lt : 'random';
-  try { myAvatar = localStorage.getItem('ygo.avatar') || ''; } catch (e) { /* ignore */ }
+  try { myAvatar = localStorage.getItem('ygo.avatar') || ''; myFrame = localStorage.getItem('ygo.frame') || ''; } catch (e) { /* ignore */ }
   paintAv(); paint();
 })();
 function paintAv() {
   const d = decks.find(x => x.id === mine);
-  $('avImg').src = myAvatar || (d && d.portrait) || '/images/avatar/Kuriboh-DAR.png';
+  $('avImg').innerHTML = avatarHTML(myAvatar || (d && d.portrait) || '/images/avatar/Kuriboh-DAR.png', myFrame || (d && d.frame) || DEFAULT_FRAME, 'You');
   $('avName').textContent = myAvatar ? decodeURIComponent(myAvatar.split('/').pop()).replace(/-DAR.*$/, '') : 'Deck default';
 }
-$('bAvatar').onclick = async () => { const v = await pickAvatar(myAvatar); if (v === null) return; myAvatar = v; paintAv(); };
+$('bAvatar').onclick = async () => { const v = await pickAvatar({ avatar: myAvatar, frame: myFrame }); if (v === null) return; myAvatar = v.avatar; myFrame = v.frame; paintAv(); };
 </script>
 </div></body></html>

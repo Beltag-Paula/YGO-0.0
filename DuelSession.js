@@ -43,10 +43,10 @@ class DuelSession {
         const bs = DeckInventory.summarize(o.botDeckId, botDeck);
 
         this.human = new Player((o.playerName || "You").slice(0, 24), humanDeck);
-        this.human.profile = { avatar: DeckInventory.cleanAvatar(o.playerAvatar) || hs.portrait || null, deckName: hs.name, deckId: o.playerDeckId };
+        this.human.profile = { avatar: DeckInventory.cleanAvatar(o.playerAvatar) || hs.portrait || null, frame: DeckInventory.cleanFrame(o.playerFrame) || hs.frame || null, deckName: hs.name, deckId: o.playerDeckId };
         const botName = bs.ownerName || "Duel Bot";
         this.bot = new Player(botName, botDeck);
-        this.bot.profile = { avatar: bs.portrait || null, deckName: bs.name, deckId: o.botDeckId };
+        this.bot.profile = { avatar: bs.portrait || null, frame: bs.frame || DeckInventory.frames()[Math.floor(Math.random() * Math.max(1, DeckInventory.frames().length))] || null, deckName: bs.name, deckId: o.botDeckId };
 
         const first = o.first === "you" || o.first === "bot" ? o.first : (Math.random() < 0.5 ? "you" : "bot");
         this.first = first;
@@ -317,6 +317,8 @@ class DuelSession {
                 return this._run(() => card && g.dispatch({ type: "SET_SPELL_TRAP", payload: { card } }));
             case "activateSet":
                 return this._run(() => card && g.dispatch({ type: "ACTIVATE_SET_CARD", payload: { card, targetInstanceId: tgt } }));
+            case "gemini":
+                return this._run(() => card && g.dispatch({ type: "GEMINI_SUMMON", payload: { card } }));
             case "monsterEffect":
                 return this._run(() => card && g.dispatch({ type: "ACTIVATE_MONSTER_EFFECT", payload: { card, targetInstanceId: tgt } }));
             case "unequip":
@@ -461,6 +463,7 @@ class DuelSession {
             if (gc.owner !== h) return act;
             if (main) {
                 if (g.canChangePosition(gc)) act.position = true;
+                if (g.canGeminiSummon && g.canGeminiSummon(gc)) act.gemini = true;
                 const ign = gc.faceUp && !gc.modifiers.effectsNegated ? g.getIgnitionMeta && g.getIgnitionMeta(gc.card.name) : null;
                 if (ign) {
                     let ok = false;
@@ -572,7 +575,7 @@ class DuelSession {
         };
         const pile = arr => arr.map(c => this.cardView(c, true));
         const view = {
-            name: p.name, lp: p.lifePoints, avatar: p.profile.avatar || null, deckName: p.profile.deckName || "",
+            name: p.name, lp: p.lifePoints, avatar: p.profile.avatar || null, frame: p.profile.frame || null, deckName: p.profile.deckName || "",
             counts: { deck: z.deck.length, extra: z.extraDeck.length, gy: z.graveyard.length, banished: z.banished.length, hand: z.hand.length },
             monsters: z.monster.map(c => slot(c, "monster")),
             spellTrap: z.spellTrap.map(c => slot(c, "spellTrap")),

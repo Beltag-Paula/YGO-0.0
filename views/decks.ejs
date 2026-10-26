@@ -51,7 +51,7 @@ async function showDetail(id) {
     '<span class="s ' + c.script.status + '" title="' + esc(c.script.note || c.script.kinds.join(', ') || '') + '">' + ({vanilla:'VANILLA',scripted:'SCRIPTED',partial:'PARTIAL',stub:'NO SCRIPT'})[c.script.status] + '</span><span class="x">×' + c.copies + '</span></div>').join('');
   const cov = sum.script;
   $('detail').innerHTML =
-    '<div class="who">' + (sum.portrait ? '<img src="' + esc(sum.portrait) + '" alt="">' : '') + '<div><h2>' + esc(d.name) + '</h2>' + (sum.ownerName ? '<div class="sub" style="margin:0;color:var(--gold)">DECK OF ' + esc(sum.ownerName.toUpperCase()) + '</div>' : '') + '</div></div><div class="sub" style="margin:0">' + d.counts.main + ' main · ' + d.counts.extra + ' extra · ' + d.counts.side + ' side</div>' +
+    '<div class="who">' + (sum.portrait ? '<span class="av-mini">' + avatarHTML(sum.portrait, sum.frame, sum.ownerName) + '</span>' : '') + '<div><h2>' + esc(d.name) + '</h2>' + (sum.ownerName ? '<div class="sub" style="margin:0;color:var(--gold)">DECK OF ' + esc(sum.ownerName.toUpperCase()) + '</div>' : '') + '</div></div><div class="sub" style="margin:0">' + d.counts.main + ' main · ' + d.counts.extra + ' extra · ' + d.counts.side + ' side</div>' +
     '<div class="stats">' + (cov ? '<span class="chip ' + (cov.pct >= 85 ? 'ok' : cov.pct >= 50 ? 'mid' : 'low') + '">' + cov.pct + '% SCRIPTED (' + (cov.vanilla + cov.scripted + cov.partial) + '/' + cov.total + ')</span>' : '') +
     (d.warnings || []).map(w => '<span class="chip low">' + esc(w) + '</span>').join('') + '</div>' +
     '<div class="row-end" style="justify-content:flex-start;margin:0 0 6px"><a class="btn small" href="/duel?deck=' + encodeURIComponent(id) + '">Duel with this</a>' +

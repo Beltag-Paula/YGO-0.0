@@ -345,6 +345,10 @@ class MainGame {
                 if (this.phase !== "battle") return;
                 this.declareAttack(action.payload.attacker, action.payload.target || null);
                 break;
+            case "GEMINI_SUMMON":
+                if (!inMainPhase) return;
+                this.geminiSummon(action.payload.card);
+                break;
             case "ACTIVATE_MONSTER_EFFECT":
                 if (!inMainPhase) return;
                 this.activateMonsterEffect(action.payload.card, action.payload.targetInstanceId || null);
@@ -512,6 +516,24 @@ class MainGame {
 
         // A Tribute Summon/Set frees the zone it needs, so a full field is fine when Tributing.
         return p.getFreeMonsterSlot() !== -1 || this.getRequiredTributesForSummon(p, gc).total > 0;
+    }
+
+    /** A face-up Gemini monster on your field may be "Normal Summoned" again to turn its effect on. */
+    canGeminiSummon(gc) {
+        const p = gc && gc.owner;
+        if (!gc || gc.location !== "monster" || !gc.faceUp || p !== this.currentPlayer || !Effects.isGemini(gc.card.name)) return false;
+        if (gc.state.geminiActive) return false;
+        if (this.summonLocked && this.summonLocked(p, false)) return false;
+        return !!this.summonMode(p);
+    }
+    geminiSummon(gc) {
+        if (!this.canGeminiSummon(gc)) return false;
+        const p = gc.owner, mode = this.summonMode(p);
+        if (mode === "extra") p.extraNormalSummons--;
+        p.normalSummonedThisTurn = true; this.state.actedThisWindow = true;
+        this.addLog(`${p.name} Gemini Summons ${gc.card.name} — it is now an Effect Monster!`);
+        Effects.geminiActivate(this, gc);
+        return true;
     }
 
     // Which allowance would a Normal Summon/Set use right now?
@@ -856,7 +878,7 @@ class MainGame {
             return false;
         }
         const directInfo = Effects.getDirectAttacker(attacker.card.name) || (Effects.canAttackDirectlyNow(this, attacker) ? {} : null);
-        if (target && Effects.hasAttackAll(attacker.card.name) && (attacker.state.attackedTargets || []).includes(target.instanceId)) {
+        if (target && Effects.hasAttackAll(attacker) && (attacker.state.attackedTargets || []).includes(target.instanceId)) {
             this.addLog(`${attacker.card.name} has already attacked ${target.card.name} this turn.`);
             return false;
         }
@@ -1040,7 +1062,7 @@ class MainGame {
                 if (atkVal > defVal) {
                     destroy(target, attacker);
                     this.addLog(`${target.card.name} destroyed!`);
-                    if (Effects.hasPiercing(attacker.card.name)) {
+                    if (Effects.hasPiercing(attacker)) {
                         const pierce = dealDamage(defender, atkVal - defVal, attacker);
                         if (pierce > 0) {
                             event.damage = pierce;
@@ -1074,7 +1096,7 @@ class MainGame {
         }
 
         // Hayabusa Knight-style monsters: a second attack each Battle Phase.
-        const moreTargets = Effects.hasAttackAll(attacker.card.name) && attacker.location === "monster" &&
+        const moreTargets = Effects.hasAttackAll(attacker) && attacker.location === "monster" &&
             this.opponentPlayer.getMonstersOnField().some(t => !(attacker.state.attackedTargets || []).includes(t.instanceId));
         if (attacker.location === "monster" && (moreTargets || ((Effects.hasSecondAttack(attacker.card.name) || attacker.state.bonusAttack) && !attacker.state.usedSecondAttack))) {
             if (!moreTargets) attacker.state.usedSecondAttack = true;
@@ -1545,7 +1567,7 @@ class MainGame {
             position: gc.position || null,
             ...extra
         };
-        if (kind === "summon" && gc.location === "monster") Effects.runAnySummonHooks(this, gc);
+        if (kind === "summon" && gc.location === "monster") { Effects.geminiOnSummoned(gc); Effects.runAnySummonHooks(this, gc); }
     }
 
     // True if `player`currently controls a face-up monster on the field

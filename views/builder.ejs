@@ -5,7 +5,7 @@
   <h1 class="title" style="margin:0;font-size:26px">Deck Builder</h1>
   <input type="text" id="dName" maxlength="60" placeholder="Deck name" style="margin-left:18px">
   <div class="owner-pick" id="owners" title="Pick a duelist portrait for this deck"></div>
-  <button class="avatar-btn" id="bAvatar" title="Pick an avatar for this deck"><img id="avImg" src="/images/avatar/Kuriboh-DAR.png" alt=""><span>Avatar</span></button>
+  <button class="avatar-btn" id="bAvatar" title="Pick an avatar and frame for this deck"><span class="av-mini" id="avImg"></span><span>Avatar</span></button>
   <span class="bd-dirty" id="dirty"></span>
   <span class="spacer"></span>
   <button class="btn gold small" id="bSave">Save deck</button>
@@ -47,7 +47,7 @@ const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const LIM = { mainMin: 40, mainMax: 60, extraMax: 15, sideMax: 15, copies: 3 };
 const deck = { main: [], extra: [], side: [] };         // arrays of card briefs (one entry per copy)
-let editing = null, builtin = false, owner = null, avatar = '', dirty = false, offset = 0, total = 0, loading = 0;
+let editing = null, builtin = false, owner = null, avatar = '', frame = '', dirty = false, offset = 0, total = 0, loading = 0;
 
 const markDirty = v => { dirty = v; $('dirty').textContent = v ? '● UNSAVED CHANGES' : ''; };
 window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -126,7 +126,7 @@ let tmr; const later = () => { clearTimeout(tmr); tmr = setTimeout(() => search(
 $('more').onclick = () => search(false);
 
 // ---- save / load -------------------------------------------------------------------------------
-const body = () => ({ name: $('dName').value.trim() || 'New Deck', owner, avatar, main: deck.main.map(c => c.id), extra: deck.extra.map(c => c.id), side: deck.side.map(c => c.id) });
+const body = () => ({ name: $('dName').value.trim() || 'New Deck', owner, avatar, frame, main: deck.main.map(c => c.id), extra: deck.extra.map(c => c.id), side: deck.side.map(c => c.id) });
 async function save(asCopy) {
   const update = editing && !builtin && !asCopy;
   try {
@@ -149,8 +149,8 @@ $('bExport').onclick = () => {
 };
 $('dName').addEventListener('input', () => markDirty(true));
 const ownerPortrait = { yugi: '/images/YamiYugi-MDDG.png', kaiba: '/images/Kaiba-MDDG.png', joey: '/images/Joey-MDDG.png', mai: '/images/Mai-MDDG.png', jesse: '/images/Jesse-MDDG.png', jaden: '/images/Jaden-MDDG.png' };
-function paintAvatar() { $('avImg').src = avatar || (owner && ownerPortrait[owner]) || '/images/avatar/Kuriboh-DAR.png'; }
-$('bAvatar').onclick = async () => { const v = await pickAvatar(avatar); if (v === null) return; avatar = v; paintAvatar(); markDirty(true); };
+function paintAvatar() { $('avImg').innerHTML = avatarHTML(avatar || (owner && ownerPortrait[owner]) || '/images/avatar/Kuriboh-DAR.png', frame || DEFAULT_FRAME, $('dName').value); }
+$('bAvatar').onclick = async () => { const v = await pickAvatar({ avatar, frame }); if (v === null) return; avatar = v.avatar; frame = v.frame; paintAvatar(); markDirty(true); };
 
 function paintOwners(list) {
   const h = $('owners'); h.innerHTML = '';
@@ -170,7 +170,7 @@ function paintOwners(list) {
       const cards = []; for (let i = 0; i < ids.length; i += 150) cards.push(...(await api('/api/cards?ids=' + ids.slice(i, i + 150).join(','))).cards);
       const by = new Map(cards.map(c => [c.id, c])); const pick = a => a.map(i => by.get(i)).filter(Boolean);
       deck.main = pick(d.main); deck.extra = pick(d.extra); deck.side = pick(d.side); ['main', 'extra', 'side'].forEach(sortZone);
-      owner = d.owner; avatar = d.avatar || ''; builtin = d.builtin; $('dName').value = builtin ? d.name + ' (copy)' : d.name;
+      owner = d.owner; avatar = d.avatar || ''; frame = d.frame || ''; builtin = d.builtin; $('dName').value = builtin ? d.name + ' (copy)' : d.name;
       if (builtin) { toast('This is a duelist deck — saving creates your own copy.'); $('bSave').textContent = 'Save as new deck'; $('bCopy').style.display = 'none'; editing = null; }
       else { editing = d.id; $('bDel').style.display = ''; }
     } catch (e) { toast(e.message, true); }

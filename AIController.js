@@ -94,6 +94,12 @@ function customTarget(game, gc, meta) {
 function actMainPhase(game) {
     const p = game.currentPlayer;
 
+    // 0) A Gemini monster already on the field: spend the Normal Summon on turning its effect on (when nothing better is in hand).
+    const gem = p.getMonstersOnField().find(gc => game.canGeminiSummon(gc));
+    if (gem && (!p.zone.hand.some(gc => game.canNormalSummon(gc)) || Math.random() < 0.5)) {
+        if (game.dispatch({ type: "GEMINI_SUMMON", payload: { card: gem } }) !== false && gem.state.geminiActive) return { acted: true, visible: true };
+    }
+
     // 1) Try to Normal Summon / Tribute Summon the best available monster,
     // in whichever position (Attack or Defense) makes sense right now.
     if (!game.state.actedThisWindow || game.summonMode(p) === "extra") {

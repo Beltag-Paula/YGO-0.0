@@ -7,7 +7,9 @@
     <a href="/decks" class="<%= page==='decks'?'on':'' %>">Decks</a>
     <a href="/builder" class="<%= page==='builder'?'on':'' %>">Deck Builder</a>
   </nav>
+  <div class="theme-swatches" id="themeSw" title="Colour theme"><button data-t="blue"></button><button data-t="red"></button><button data-t="yellow"></button><button data-t="purple"></button></div>
 </div>
+<script>document.querySelectorAll('#themeSw button').forEach(b => { b.onclick = () => setTheme(b.dataset.t); }); setTheme(document.documentElement.dataset.theme);</script>
 <div class="toast-host" id="toasts"></div>
 <script>
   window.toast = function (msg, err) {
@@ -30,18 +32,28 @@
       (d.counts.extra ? ' · ' + d.counts.extra + ' Extra' : '') + '</small></div>';
   };
   window.caseClass = d => 'deck-case' + (d && d.portrait ? ' has-owner' : '');
-  // Avatar picker modal: resolves to a /images/avatar/... url, '' for "none/default", or null when cancelled.
-  window.pickAvatar = async function (current) {
-    const { avatars } = await (await fetch('/api/avatars')).json();
+  // Avatar + frame picker. Resolves to { avatar, frame } ('' = use the default) or null when cancelled.
+  window.pickAvatar = async function (cur) {
+    cur = typeof cur === 'object' && cur ? cur : { avatar: cur || '', frame: '' };
+    const { avatars, frames } = await (await fetch('/api/avatars')).json();
     return new Promise(res => {
+      let av = cur.avatar || '', fr = cur.frame || '';
       const back = document.createElement('div'); back.className = 'modal-back on';
-      back.innerHTML = '<div class="panel modal" style="width:min(820px,94vw)"><h3>Choose an avatar</h3><div class="avatar-grid"></div><div class="row-end"><button class="btn ghost small" data-d>Use default</button><button class="btn ghost small" data-c>Cancel</button></div></div>';
-      const grid = back.querySelector('.avatar-grid');
-      avatars.forEach(a => { const b = document.createElement('button'); b.className = 'av' + (a.url === current ? ' on' : ''); b.title = a.name; b.innerHTML = '<img loading="lazy" src="' + a.url + '" alt=""><span>' + a.name + '</span>'; b.onclick = () => done(a.url); grid.appendChild(b); });
+      back.innerHTML = '<div class="panel modal pick-modal"><h3>Choose your duelist</h3><div class="pick-top"><div class="pick-preview" id="pkPrev"></div>' +
+        '<div class="pick-main"><div class="sec">AVATAR</div><div class="avatar-grid" id="pkAv"></div></div></div>' +
+        '<div class="sec">FRAME</div><div class="frame-strip" id="pkFr"></div>' +
+        '<div class="row-end"><button class="btn ghost small" data-d>Use defaults</button><button class="btn ghost small" data-c>Cancel</button><button class="btn gold small" data-ok>Confirm</button></div></div>';
+      const $q = s => back.querySelector(s), paint = () => {
+        $q('#pkPrev').innerHTML = avatarHTML(av || '/images/avatar/Kuriboh-DAR.png', fr || DEFAULT_FRAME, 'You');
+        $q('#pkAv').querySelectorAll('.av').forEach(b => b.classList.toggle('on', b.dataset.u === av));
+        $q('#pkFr').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.f === (fr || DEFAULT_FRAME)));
+      };
+      avatars.forEach(a => { const b = document.createElement('button'); b.className = 'av'; b.dataset.u = a.url; b.title = a.name; b.innerHTML = '<span class="av-round"><img loading="lazy" src="' + a.url + '" alt=""></span><span>' + a.name + '</span>'; b.onclick = () => { av = a.url; paint(); }; $q('#pkAv').appendChild(b); });
+      frames.forEach(f => { const b = document.createElement('button'); b.dataset.f = f; b.title = (FRAME_GEO[f] || {}).name || f; b.innerHTML = avatarHTML('/images/avatar/Kuriboh-DAR.png', f, ''); b.onclick = () => { fr = f; paint(); }; $q('#pkFr').appendChild(b); });
       const done = v => { back.remove(); res(v); };
-      back.querySelector('[data-c]').onclick = () => done(null); back.querySelector('[data-d]').onclick = () => done('');
+      $q('[data-c]').onclick = () => done(null); $q('[data-d]').onclick = () => done({ avatar: '', frame: '' }); $q('[data-ok]').onclick = () => done({ avatar: av, frame: fr });
       back.onclick = e => { if (e.target === back) done(null); };
-      document.body.appendChild(back);
+      document.body.appendChild(back); paint();
     });
   };
 </script>

@@ -14,3 +14,11 @@
     node tools/diagnose.js 40 monster
     # add one rule to ACTIONS in scripts/96_text_compiler.js, then
     npm test && node tools/coverage.js --write
+
+## UI
+* **Colour themes** – blue / red / yellow / purple (diamond swatches in the top bar, ◈ button in a duel). Everything is driven by one `--hue` variable in `public/css/md.css`; `python3 tools/themeify.py file.css` converts new blue colours to the variable.
+* **Round avatars in icon frames** – `views/images/frames` (geometry in `public/js/frames.js`) around any picture from `views/images/avatar`. Pick yours on Solo Duel; decks can carry their own in the builder.
+* Card backs come from `views/images/card-back.jpg`; coin calls use `views/images/coin`.
+
+## Tools
+`node tools/smoke_decks.js` (every shipped-deck card, per scenario) · `node tools/blockers.js` (why cards are still unscripted) · `node tools/diagnose.js` · `node tests/fuzz.js 100 1 ai`.

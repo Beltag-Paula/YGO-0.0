@@ -232,7 +232,7 @@
   function setPlate(side, v) {
     $('nm' + (side === 'you' ? 'You' : 'Opp')).textContent = v.name; $('dk' + (side === 'you' ? 'You' : 'Opp')).textContent = v.deckName;
     const ava = $('ava' + (side === 'you' ? 'You' : 'Opp'));
-    if (!ava.dataset.done) { ava.dataset.done = 1; ava.innerHTML = v.avatar ? `<img src="${esc(v.avatar)}" alt="">` : esc((v.name || '?')[0].toUpperCase()); }
+    if (!ava.dataset.done) { ava.dataset.done = 1; ava.innerHTML = avatarHTML(v.avatar, v.frame, v.name); }
   }
   function lpWidth(side, v) { return Math.max(0, Math.min(100, v / S.lpMax[side] * 100)) + '%'; }
   function setLPDisplay(side, v) {
@@ -346,6 +346,7 @@
       if (a.attack.targets.length) items.push(['Attack', () => startAttack(uid, a.attack)]);
       if (a.attack.direct) items.push(['Direct Attack', () => send('attack', { uid, target: null })]);
     }
+    if (a.gemini) items.push(['Gemini Summon', () => send('gemini', { uid })]);
     if (a.effect) items.push(['Activate Effect', () => startTargeted(uid, 'monsterEffect', a.effect.target)]);
     if (a.position) items.push([d.faceUp ? 'Change Position' : 'Flip Summon / Position', () => send('position', { uid })]);
     if (a.quick) items.push(['Activate Effect', () => send('quick', { uid })]);
@@ -471,7 +472,12 @@
         p.cards.forEach(c => { const d = document.createElement('div'); d.className = 'sc'; d.innerHTML = `<img src="${esc(c.image || '')}" alt="" onerror="this.style.opacity=.3"><span>${esc(c.name)}</span>`; d.onmouseenter = () => { S.data.set(c.uid, { ...(S.data.get(c.uid) || {}), ...c }); showInfo(c.uid); }; strip.appendChild(d); });
         box.appendChild(strip);
       }
-      const r = row(); p.options.forEach(o => r.appendChild(mk(o.label, () => { shownPrompt = null; send('option', { id: o.id }); })));
+      const isCoin = p.options.length === 2 && p.options.every(o => o.id === 'heads' || o.id === 'tails');
+      const r = row();
+      if (isCoin) {   // a coin call: the two faces are the Millennium Puzzle (heads) and Winged Kuriboh (tails)
+        r.className += ' coin-row';
+        p.options.forEach(o => { const b = document.createElement('button'); b.className = 'coin-btn'; b.innerHTML = `<img src="/images/coin/coin-${o.id}.png" alt=""><span>${esc(o.label)}</span>`; b.onclick = () => { shownPrompt = null; send('option', { id: o.id }); }; r.appendChild(b); });
+      } else p.options.forEach(o => r.appendChild(mk(o.label, () => { shownPrompt = null; send('option', { id: o.id }); })));
       box.appendChild(r); box.className = 'on'; return;
     }
     if (p.type === 'fieldChoice') { startFieldPick(p); return; }
